@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Returns Analysis</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-logo"><div class="logo-title">Orders & Returns</div><div class="logo-sub">Heart&amp;Sole Team</div></div>
+  <nav>
+    <a href="index.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>Dashboard</a>
+    <a href="monthly.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>Monthly View</a>
+    <a href="weekly.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>Weekly View</a>
+    <a href="returns.html" class="nav-item active"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>Returns Analysis</a>
+    <a href="upload.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>Upload Data</a>
+  </nav>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <h1>Returns Analysis</h1>
+    <span id="totalCount" style="font-size:13px;color:var(--text-muted)"></span>
+  </div>
+  <div class="content">
+
+    <div class="card">
+      <div class="card-header">
+        Return Records
+        <button class="btn btn-outline" onclick="exportCSV()" style="font-size:12px;padding:6px 12px">↓ Export CSV</button>
+      </div>
+      <div class="card-body" style="padding-bottom:0">
+        <div class="filters">
+          <input type="text" id="searchInput" placeholder="Search product, SKU, ASIN, order ID…" oninput="debounce()" />
+          <select id="reasonFilter" onchange="loadReturns(1)"><option value="">All Reasons</option></select>
+          <select id="brandFilter" onchange="loadReturns(1)"><option value="">All Brands</option></select>
+          <select id="monthFilter" onchange="loadReturns(1)"><option value="">All Months</option></select>
+          <select id="dispositionFilter" onchange="loadReturns(1)"><option value="">All Dispositions</option></select>
+          <button class="btn btn-outline" onclick="clearFilters()" style="font-size:12px;padding:7px 12px">Clear</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Return Date</th>
+            <th>Purchase Month</th>
+            <th>Product</th>
+            <th>Brand</th>
+            <th>Reason</th>
+            <th>Disposition</th>
+            <th>Gender</th>
+            <th class="text-right">Qty</th>
+            <th>Customer Comment</th>
+          </tr></thead>
+          <tbody id="returnsBody"><tr><td colspan="9" class="text-center" style="padding:32px"><span class="spinner"></span></td></tr></tbody>
+        </table>
+      </div>
+      <div class="card-body" style="padding-top:16px">
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let debounceTimer;
+let allRecords = [];
+
+function debounce() { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => loadReturns(1), 350); }
+
+async function loadFilters() {
+  const f = await fetch('/api/filters').then(r => r.json());
+  const add = (id, items) => { const s = document.getElementById(id); items.forEach(v => { const o = document.createElement('option'); o.value=v; o.textContent=v.replace(/_/g,' '); s.appendChild(o); }); };
+  add('reasonFilter', f.reasons);
+  add('brandFilter', f.brands);
+  add('monthFilter', f.months);
+  add('dispositionFilter', f.dispositions);
+}
+
+async function loadReturns(page=1) {
+  const params = new URLSearchParams({
+    page, limit: 50,
+    search: document.getElementById('searchInput').value,
+    reason: document.getElementById('reasonFilter').value,
+    brand: document.getElementById('brandFilter').value,
+    month: document.getElementById('monthFilter').value,
+    disposition: document.getElementById('dispositionFilter').value,
+  });
+
+  document.getElementById('returnsBody').innerHTML = '<tr><td colspan="9" class="text-center" style="padding:32px"><span class="spinner"></span></td></tr>';
+  const d = await fetch('/api/returns?' + params).then(r => r.json());
+  allRecords = d.records;
+  document.getElementById('totalCount').textContent = d.total.toLocaleString() + ' records';
+
+  const dispColors = { SELLABLE:'#38a169', CUSTOMER_DAMAGED:'#e53e3e', CARRIER_DAMAGED:'#dd6b20', DAMAGED:'#fc8181', DEFECTIVE:'#9f7aea' };
+
+  const tbody = document.getElementById('returnsBody');
+  tbody.innerHTML = d.records.length ? d.records.map(r => `
+    <tr>
+      <td style="white-space:nowrap">${r.return_date||'—'}</td>
+      <td style="white-space:nowrap;color:var(--text-muted)">${r.purchase_month||'—'}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.product_name||''}">${r.product_name||'—'}</td>
+      <td>${r.brand||'—'}</td>
+      <td><span class="reason-badge badge-default" style="background:#e9ecef;color:#495057;font-size:10px">${(r.reason||'').replace(/_/g,' ')}</span></td>
+      <td><span class="reason-badge badge-default" style="background:${dispColors[r.disposition]||'#e9ecef'}22;color:${dispColors[r.disposition]||'#495057'};font-size:10px">${r.disposition||'—'}</span></td>
+      <td>${r.gender||'—'}</td>
+      <td class="text-right">${r.quantity||1}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted)" title="${r.customer_comments||''}">${r.customer_comments||'—'}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="9" class="text-center" style="padding:32px;color:var(--text-muted)">No records found.</td></tr>';
+
+  renderPagination(d.page, d.pages, loadReturns);
+}
+
+function renderPagination(current, total, fn) {
+  const el = document.getElementById('pagination');
+  if (total <= 1) { el.innerHTML=''; return; }
+  let html = `<button ${current===1?'disabled':''} onclick="fn(${current-1})">← Prev</button>`;
+  let start = Math.max(1, current-2), end = Math.min(total, start+4);
+  if (end-start<4) start=Math.max(1,end-4);
+  if (start>1) html+=`<button onclick="fn(1)">1</button><span style="padding:0 4px">…</span>`;
+  for(let i=start;i<=end;i++) html+=`<button class="${i===current?'active':''}" onclick="fn(${i})">${i}</button>`;
+  if(end<total) html+=`<span style="padding:0 4px">…</span><button onclick="fn(${total})">${total}</button>`;
+  html+=`<button ${current===total?'disabled':''} onclick="fn(${current+1})">Next →</button>`;
+  html+=`<span class="page-info">Page ${current} of ${total}</span>`;
+  el.innerHTML = html;
+  // make fn accessible
+  window.fn = fn;
+}
+
+function clearFilters() {
+  ['searchInput','reasonFilter','brandFilter','monthFilter','dispositionFilter'].forEach(id => { const el = document.getElementById(id); el.tagName==='INPUT'?el.value='':el.value=''; });
+  loadReturns(1);
+}
+
+async function exportCSV() {
+  const params = new URLSearchParams({ page:1, limit:9999, search: document.getElementById('searchInput').value, reason: document.getElementById('reasonFilter').value, brand: document.getElementById('brandFilter').value, month: document.getElementById('monthFilter').value, disposition: document.getElementById('dispositionFilter').value });
+  const d = await fetch('/api/returns?'+params).then(r=>r.json());
+  const headers = ['Return Date','Purchase Month','Product','Brand','Reason','Disposition','Gender','Qty','Customer Comment','Order ID','ASIN'];
+  const rows = d.records.map(r=>[r.return_date,r.purchase_month,`"${(r.product_name||'').replace(/"/g,'""')}"`,r.brand,r.reason,r.disposition,r.gender,r.quantity,`"${(r.customer_comments||'').replace(/"/g,'""')}"`,r.order_id,r.asin]);
+  const csv=[headers,...rows].map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`returns_${new Date().toISOString().slice(0,10)}.csv`;a.click();
+}
+
+loadFilters().then(()=>loadReturns(1));
+</script>
+</body></html>

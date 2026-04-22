@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Monthly View</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-logo"><div class="logo-title">Orders & Returns</div><div class="logo-sub">Heart&amp;Sole Team</div></div>
+  <nav>
+    <a href="index.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>Dashboard</a>
+    <a href="monthly.html" class="nav-item active"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>Monthly View</a>
+    <a href="weekly.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>Weekly View</a>
+    <a href="returns.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>Returns Analysis</a>
+    <a href="upload.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>Upload Data</a>
+  </nav>
+</aside>
+
+<div class="main">
+  <div class="topbar"><h1>Monthly View</h1></div>
+  <div class="content">
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header">Monthly Orders & Revenue</div>
+        <div class="card-body"><div class="chart-container"><canvas id="ordersChart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">Monthly Returns & Return Rate</div>
+        <div class="card-body"><div class="chart-container"><canvas id="returnsChart"></canvas></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Monthly Summary Table
+        <button class="btn btn-outline" onclick="exportCSV()" style="font-size:12px;padding:6px 12px">↓ Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Month</th>
+            <th class="text-right">Shipped Orders</th>
+            <th class="text-right">Units Sold</th>
+            <th class="text-right">Revenue</th>
+            <th class="text-right">Cancelled</th>
+            <th class="text-right">Returns</th>
+            <th class="text-right">Return Units</th>
+            <th class="text-right">Return Rate</th>
+          </tr></thead>
+          <tbody id="monthlyBody"><tr><td colspan="8" class="text-center" style="padding:24px"><span class="spinner"></span></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const fmt = n => n == null ? '—' : '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtPct = (ret, ord) => ord > 0 ? ((ret/ord)*100).toFixed(1)+'%' : '—';
+let monthlyData = [];
+
+async function load() {
+  const d = await fetch('/api/summary').then(r => r.json());
+  monthlyData = d.monthly;
+  const all = d.monthly;
+
+  const labels = all.map(m => m.month?.replace(/-\d{4}/,'') || m.month);
+
+  new Chart(document.getElementById('ordersChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Shipped Orders', data: all.map(m => m.orders), backgroundColor: '#FF9900', borderRadius: 3, yAxisID: 'y' },
+        { label: 'Revenue ($)', data: all.map(m => m.revenue), type: 'line', borderColor: '#38a169', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2, yAxisID: 'y2' },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+        y: { position: 'left', title: { display: true, text: 'Orders' } },
+        y2: { position: 'right', grid: { drawOnChartArea: false }, ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k' } }
+      }
+    }
+  });
+
+  new Chart(document.getElementById('returnsChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Returns', data: all.map(m => m.returns), backgroundColor: '#e53e3e', borderRadius: 3, yAxisID: 'y' },
+        { label: 'Return Rate %', data: all.map(m => m.orders > 0 ? +((m.returns/m.orders)*100).toFixed(2) : 0), type: 'line', borderColor: '#9f7aea', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2, yAxisID: 'y2' },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+        y: { position: 'left', title: { display: true, text: 'Returns' } },
+        y2: { position: 'right', grid: { drawOnChartArea: false }, ticks: { callback: v => v + '%' } }
+      }
+    }
+  });
+
+  const tbody = document.getElementById('monthlyBody');
+  tbody.innerHTML = [...all].reverse().map(m => `
+    <tr>
+      <td style="font-weight:500">${m.month||'—'}</td>
+      <td class="text-right">${(m.orders||0).toLocaleString()}</td>
+      <td class="text-right">${(m.units||0).toLocaleString()}</td>
+      <td class="text-right amount-positive">${fmt(m.revenue)}</td>
+      <td class="text-right" style="color:var(--text-muted)">${(m.cancelled||0).toLocaleString()}</td>
+      <td class="text-right amount-negative">${(m.returns||0).toLocaleString()}</td>
+      <td class="text-right">${(m.return_units||0).toLocaleString()}</td>
+      <td class="text-right" style="font-weight:600;color:${m.orders>0&&(m.returns/m.orders)>0.1?'var(--red)':'var(--text)'}">${fmtPct(m.returns,m.orders)}</td>
+    </tr>`).join('');
+}
+
+function exportCSV() {
+  const headers = ['Month','Shipped Orders','Units Sold','Revenue','Cancelled','Returns','Return Units','Return Rate'];
+  const rows = monthlyData.map(m => [m.month, m.orders, m.units, m.revenue?.toFixed(2), m.cancelled, m.returns, m.return_units, m.orders>0?((m.returns/m.orders)*100).toFixed(2)+'%':'0%']);
+  const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `monthly_orders_returns_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+}
+
+load();
+</script>
+</body></html>

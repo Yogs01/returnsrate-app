@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Orders & Returns Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-title">Orders & Returns</div>
+    <div class="logo-sub">Heart&amp;Sole Team</div>
+  </div>
+  <nav>
+    <a href="index.html" class="nav-item active">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+      Dashboard
+    </a>
+    <a href="monthly.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+      Monthly View
+    </a>
+    <a href="weekly.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      Weekly View
+    </a>
+    <a href="returns.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+      Returns Analysis
+    </a>
+    <a href="upload.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+      Upload Data
+    </a>
+  </nav>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <h1>Orders & Returns Dashboard</h1>
+    <button class="btn btn-primary" onclick="location.href='upload.html'">Upload New Data</button>
+  </div>
+  <div class="content">
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Total Orders (Shipped)</div><div class="value brand" id="sOrders">—</div><div class="sub" id="sUnits">— units</div></div>
+      <div class="stat-card"><div class="label">Total Revenue</div><div class="value green" id="sRevenue">—</div><div class="sub">Shipped orders only</div></div>
+      <div class="stat-card"><div class="label">Total Returns</div><div class="value red" id="sReturns">—</div><div class="sub" id="sReturnUnits">— units returned</div></div>
+      <div class="stat-card"><div class="label">Overall Return Rate</div><div class="value" id="sReturnRate">—</div><div class="sub">Returns / Orders</div></div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header">Monthly Orders vs Returns</div>
+        <div class="card-body"><div class="chart-container"><canvas id="monthlyChart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">Return Rate by Month (%)</div>
+        <div class="card-body"><div class="chart-container"><canvas id="rateChart"></canvas></div></div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header">Top Return Reasons</div>
+        <div class="card-body"><div class="chart-container"><canvas id="reasonChart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">Returns by Disposition</div>
+        <div class="card-body"><div class="chart-container"><canvas id="dispositionChart"></canvas></div></div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header">Top Brands by Returns</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Brand</th><th class="text-right">Returns</th><th class="text-right">Units</th></tr></thead>
+            <tbody id="brandTable"><tr><td colspan="3" class="text-center" style="padding:24px"><span class="spinner"></span></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Returns by Gender</div>
+        <div class="card-body"><div class="chart-container" style="height:220px"><canvas id="genderChart"></canvas></div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const fmt = n => n == null ? '—' : '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtPct = n => n == null ? '—' : (n*100).toFixed(1) + '%';
+
+async function load() {
+  const d = await fetch('/api/summary').then(r => r.json());
+  const { orderStats, returnStats, monthly, weekly, byReason, byDisposition, byBrand, byGender } = d;
+
+  document.getElementById('sOrders').textContent = (orderStats.shipped||0).toLocaleString();
+  document.getElementById('sUnits').textContent = (orderStats.units||0).toLocaleString() + ' units';
+  document.getElementById('sRevenue').textContent = fmt(orderStats.revenue);
+  document.getElementById('sReturns').textContent = (returnStats.total||0).toLocaleString();
+  document.getElementById('sReturnUnits').textContent = (returnStats.units||0).toLocaleString() + ' units returned';
+  const rate = orderStats.shipped ? returnStats.total / orderStats.shipped : 0;
+  document.getElementById('sReturnRate').textContent = fmtPct(rate);
+
+  // Monthly orders vs returns
+  const last18 = monthly.slice(-18);
+  new Chart(document.getElementById('monthlyChart'), {
+    type: 'bar',
+    data: {
+      labels: last18.map(m => m.month?.replace(/-\d{4}/,'')),
+      datasets: [
+        { label: 'Orders', data: last18.map(m => m.orders), backgroundColor: '#FF9900', borderRadius: 3, stack: 'a' },
+        { label: 'Returns', data: last18.map(m => m.returns), backgroundColor: '#e53e3e', borderRadius: 3, stack: 'b' },
+      ]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}, scales:{x:{ticks:{font:{size:10},maxRotation:45}}} }
+  });
+
+  // Return rate line
+  new Chart(document.getElementById('rateChart'), {
+    type: 'line',
+    data: {
+      labels: last18.map(m => m.month?.replace(/-\d{4}/,'')),
+      datasets: [{ label: 'Return Rate %', data: last18.map(m => m.orders > 0 ? +((m.returns/m.orders)*100).toFixed(2) : 0), borderColor: '#e53e3e', backgroundColor: 'rgba(229,62,62,0.08)', tension: 0.3, fill: true, pointRadius: 3 }]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:10},maxRotation:45}}, y:{ticks:{callback:v=>v+'%'}}} }
+  });
+
+  // Reason bar
+  const top10 = byReason.slice(0,10);
+  new Chart(document.getElementById('reasonChart'), {
+    type: 'bar',
+    data: { labels: top10.map(r => r.reason.replace(/_/g,' ')), datasets: [{ data: top10.map(r => r.count), backgroundColor: '#3182ce', borderRadius: 3 }] },
+    options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:10}}}, y:{ticks:{font:{size:10}}}} }
+  });
+
+  // Disposition doughnut
+  const dispColors = { SELLABLE:'#38a169', CUSTOMER_DAMAGED:'#e53e3e', CARRIER_DAMAGED:'#dd6b20', DAMAGED:'#fc8181', DEFECTIVE:'#9f7aea' };
+  new Chart(document.getElementById('dispositionChart'), {
+    type: 'doughnut',
+    data: { labels: byDisposition.map(d => d.disposition), datasets: [{ data: byDisposition.map(d => d.count), backgroundColor: byDisposition.map(d => dispColors[d.disposition]||'#a0aec0') }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}} }
+  });
+
+  // Brand table
+  const tb = document.getElementById('brandTable');
+  tb.innerHTML = byBrand.length ? byBrand.map(b => `<tr><td style="font-weight:500">${b.brand}</td><td class="text-right">${b.count.toLocaleString()}</td><td class="text-right">${(b.units||0).toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="3" class="text-center" style="padding:24px;color:var(--text-muted)">No data yet.</td></tr>';
+
+  // Gender doughnut
+  new Chart(document.getElementById('genderChart'), {
+    type: 'doughnut',
+    data: { labels: byGender.map(g => g.gender||'Unknown'), datasets: [{ data: byGender.map(g => g.count), backgroundColor: ['#3182ce','#e53e3e','#38a169','#a0aec0'] }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}} }
+  });
+}
+
+load();
+</script>
+</body></html>

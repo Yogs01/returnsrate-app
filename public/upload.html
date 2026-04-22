@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Upload Data</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-logo"><div class="logo-title">Orders & Returns</div><div class="logo-sub">Heart&amp;Sole Team</div></div>
+  <nav>
+    <a href="index.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>Dashboard</a>
+    <a href="monthly.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>Monthly View</a>
+    <a href="weekly.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>Weekly View</a>
+    <a href="returns.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>Returns Analysis</a>
+    <a href="upload.html" class="nav-item active"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>Upload Data</a>
+  </nav>
+</aside>
+
+<div class="main">
+  <div class="topbar"><h1>Upload Orders & Returns Data</h1></div>
+  <div class="content">
+    <div class="two-col">
+      <div>
+        <div class="card" style="margin-bottom:24px">
+          <div class="card-header">Upload File</div>
+          <div class="card-body">
+            <div id="alertBox"></div>
+            <div style="margin-bottom:16px">
+              <label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px">Your name (optional)</label>
+              <input type="text" id="uploaderName" placeholder="e.g. Maria" style="padding:8px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;width:100%;outline:none" />
+            </div>
+            <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+              <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.txt,.tsv" style="display:none" onchange="handleFile(this.files[0])" />
+              <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+              <div class="upload-title" id="dropTitle">Drop your file here or click to browse</div>
+              <div class="upload-sub">Accepts .xlsx with "All Orders Raw" and/or "Return Raw" sheets</div>
+            </div>
+            <div id="fileInfo" style="display:none;margin-top:14px;padding:12px;background:#f7fafc;border-radius:8px;font-size:13px">
+              <div id="fileName" style="font-weight:600;margin-bottom:4px"></div>
+              <div id="fileSize" style="color:var(--text-muted)"></div>
+            </div>
+            <div id="progressWrap" style="display:none;margin-top:14px">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Uploading & importing (large files may take a minute)…</div>
+              <div class="progress"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+            </div>
+            <button class="btn btn-primary" id="uploadBtn" onclick="doUpload()" style="margin-top:18px;width:100%;justify-content:center;display:none">Upload & Import</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">How to download from Amazon</div>
+          <div class="card-body">
+            <div class="instruction-step">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <div class="step-title">Orders — Seller Central → Reports → Business Reports</div>
+                <div class="step-desc">Download "Orders" report for your date range. File should contain order-id, purchase-date, item-price, quantity, etc.</div>
+              </div>
+            </div>
+            <div class="instruction-step">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <div class="step-title">Returns — Reports → Fulfillment → FBA Customer Returns</div>
+                <div class="step-desc">Download the returns report. Contains return-date, reason, disposition, quantity.</div>
+              </div>
+            </div>
+            <div class="instruction-step">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <div class="step-title">Upload the file here</div>
+                <div class="step-desc">Drop the file above. If it contains both "All Orders Raw" and "Return Raw" sheets, both will be imported automatically. Safe to re-upload — duplicates are skipped.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="align-self:start">
+        <div class="card-header">Upload History <button class="btn btn-outline" onclick="loadHistory()" style="font-size:11px;padding:5px 10px">Refresh</button></div>
+        <div class="card-body" id="historyBody"><div class="text-center" style="padding:24px"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let selectedFile = null;
+
+const zone = document.getElementById('dropZone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+
+function handleFile(file) {
+  selectedFile = file;
+  document.getElementById('dropTitle').textContent = file.name;
+  document.getElementById('fileInfo').style.display = 'block';
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileSize').textContent = (file.size/1024/1024).toFixed(1) + ' MB';
+  document.getElementById('uploadBtn').style.display = 'flex';
+  document.getElementById('alertBox').innerHTML = '';
+}
+
+async function doUpload() {
+  if (!selectedFile) return;
+  const btn = document.getElementById('uploadBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Importing…';
+  document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('progressBar').style.width = '30%';
+
+  const form = new FormData();
+  form.append('file', selectedFile);
+  form.append('uploaded_by', document.getElementById('uploaderName').value.trim() || 'Team Member');
+
+  try {
+    document.getElementById('progressBar').style.width = '60%';
+    const res = await fetch('/api/upload', { method: 'POST', body: form });
+    document.getElementById('progressBar').style.width = '100%';
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    if (data.duplicate_file) {
+      document.getElementById('alertBox').innerHTML = `<div class="alert alert-info">ℹ️ ${data.message}</div>`;
+    } else {
+      document.getElementById('alertBox').innerHTML = `
+        <div class="alert alert-success">
+          ✅ <strong>Import complete!</strong><br>
+          ${data.ordersAdded > 0 ? `Orders: <strong>${data.ordersAdded.toLocaleString()}</strong> added, ${data.ordersSkipped.toLocaleString()} skipped.<br>` : ''}
+          ${data.returnsAdded > 0 ? `Returns: <strong>${data.returnsAdded.toLocaleString()}</strong> added, ${data.returnsSkipped.toLocaleString()} skipped.` : ''}
+          <a href="index.html" style="color:var(--green);font-weight:600;margin-left:8px">View Dashboard →</a>
+        </div>`;
+      selectedFile = null;
+      document.getElementById('fileInfo').style.display = 'none';
+      document.getElementById('uploadBtn').style.display = 'none';
+      document.getElementById('dropTitle').textContent = 'Drop your file here or click to browse';
+      loadHistory();
+    }
+  } catch(e) {
+    document.getElementById('alertBox').innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = 'Upload & Import';
+    setTimeout(() => { document.getElementById('progressWrap').style.display='none'; document.getElementById('progressBar').style.width='0%'; }, 1500);
+  }
+}
+
+async function loadHistory() {
+  const el = document.getElementById('historyBody');
+  const logs = await fetch('/api/uploads').then(r => r.json());
+  if (!logs.length) { el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">No uploads yet.</div>'; return; }
+  el.innerHTML = logs.map(l => `
+    <div class="upload-history-item">
+      <div>
+        <div style="font-weight:500;font-size:13px">${l.filename}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">by ${l.uploaded_by} · ${new Date(l.uploaded_at).toLocaleString()}</div>
+      </div>
+      <div style="text-align:right;font-size:12px">
+        <div style="color:var(--green);font-weight:600">+${l.rows_added.toLocaleString()}</div>
+        <div style="color:var(--text-muted)">${l.rows_skipped.toLocaleString()} skipped</div>
+      </div>
+    </div>`).join('');
+}
+
+loadHistory();
+</script>
+</body></html>

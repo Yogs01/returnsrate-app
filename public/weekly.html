@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Weekly View</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-logo"><div class="logo-title">Orders & Returns</div><div class="logo-sub">Heart&amp;Sole Team</div></div>
+  <nav>
+    <a href="index.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>Dashboard</a>
+    <a href="monthly.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>Monthly View</a>
+    <a href="weekly.html" class="nav-item active"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>Weekly View</a>
+    <a href="returns.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>Returns Analysis</a>
+    <a href="upload.html" class="nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>Upload Data</a>
+  </nav>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <h1>Weekly View</h1>
+    <div style="display:flex;gap:10px;align-items:center">
+      <label style="font-size:13px;color:var(--text-muted)">Year:</label>
+      <select id="yearFilter" onchange="render()" style="padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px"></select>
+    </div>
+  </div>
+  <div class="content">
+
+    <div class="card">
+      <div class="card-header">Weekly Orders vs Returns</div>
+      <div class="card-body"><div class="chart-container" style="height:280px"><canvas id="weeklyChart"></canvas></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Weekly Return Rate (%)</div>
+      <div class="card-body"><div class="chart-container" style="height:220px"><canvas id="rateChart"></canvas></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        Weekly Summary Table
+        <button class="btn btn-outline" onclick="exportCSV()" style="font-size:12px;padding:6px 12px">↓ Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Week</th>
+            <th>Week Starting</th>
+            <th class="text-right">Shipped Orders</th>
+            <th class="text-right">Units Sold</th>
+            <th class="text-right">Revenue</th>
+            <th class="text-right">Returns</th>
+            <th class="text-right">Return Rate</th>
+          </tr></thead>
+          <tbody id="weeklyBody"><tr><td colspan="7" class="text-center" style="padding:24px"><span class="spinner"></span></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const fmt = n => n == null ? '—' : '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+let allWeekly = [];
+let charts = {};
+
+async function load() {
+  const d = await fetch('/api/summary').then(r => r.json());
+  allWeekly = d.weekly;
+
+  const years = [...new Set(allWeekly.map(w => w.year))].sort().reverse();
+  const sel = document.getElementById('yearFilter');
+  years.forEach(y => { const o = document.createElement('option'); o.value = y; o.textContent = y; sel.appendChild(o); });
+  render();
+}
+
+function render() {
+  const year = document.getElementById('yearFilter').value;
+  const rows = year ? allWeekly.filter(w => w.year === year) : allWeekly;
+
+  const labels = rows.map(w => `Wk ${w.week}`);
+
+  if (charts.weekly) charts.weekly.destroy();
+  if (charts.rate) charts.rate.destroy();
+
+  charts.weekly = new Chart(document.getElementById('weeklyChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Orders', data: rows.map(w => w.orders), backgroundColor: '#FF9900', borderRadius: 3 },
+        { label: 'Returns', data: rows.map(w => w.returns), backgroundColor: '#e53e3e', borderRadius: 3 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } },
+      scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 30 } } }
+    }
+  });
+
+  charts.rate = new Chart(document.getElementById('rateChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ label: 'Return Rate %', data: rows.map(w => w.orders > 0 ? +((w.returns/w.orders)*100).toFixed(2) : 0), borderColor: '#9f7aea', backgroundColor: 'rgba(159,122,234,0.08)', tension: 0.3, fill: true, pointRadius: 2 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 30 } }, y: { ticks: { callback: v => v + '%' } } }
+    }
+  });
+
+  const tbody = document.getElementById('weeklyBody');
+  tbody.innerHTML = [...rows].reverse().map(w => `
+    <tr>
+      <td style="font-weight:500">Week ${w.week}</td>
+      <td style="color:var(--text-muted)">${w.week_start || '—'}</td>
+      <td class="text-right">${(w.orders||0).toLocaleString()}</td>
+      <td class="text-right">${(w.units||0).toLocaleString()}</td>
+      <td class="text-right amount-positive">${fmt(w.revenue)}</td>
+      <td class="text-right amount-negative">${(w.returns||0).toLocaleString()}</td>
+      <td class="text-right" style="font-weight:600;color:${w.orders>0&&(w.returns/w.orders)>0.1?'var(--red)':'var(--text)'}">${w.orders>0?((w.returns/w.orders)*100).toFixed(1)+'%':'—'}</td>
+    </tr>`).join('');
+}
+
+function exportCSV() {
+  const year = document.getElementById('yearFilter').value;
+  const rows = year ? allWeekly.filter(w => w.year === year) : allWeekly;
+  const headers = ['Year','Week','Week Start','Shipped Orders','Units','Revenue','Returns','Return Rate'];
+  const data = rows.map(w => [w.year, w.week, w.week_start, w.orders, w.units, w.revenue?.toFixed(2), w.returns, w.orders>0?((w.returns/w.orders)*100).toFixed(2)+'%':'0%']);
+  const csv = [headers, ...data].map(r => r.join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `weekly_orders_returns_${year||'all'}.csv`; a.click();
+}
+
+load();
+</script>
+</body></html>
