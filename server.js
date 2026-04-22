@@ -155,14 +155,19 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     // Try named sheet first, fall back to first sheet
     const sheetName = wb.SheetNames.includes('All Orders Raw') ? 'All Orders Raw' : wb.SheetNames[0];
     const rows = readSheet(sheetName);
-    const insertAll = db.transaction((rows) => {
-      for (const row of rows) {
-        const rec = buildOrderRecord(row);
-        const r = insertOrder.run(rec);
-        if (r.changes > 0) ordersAdded++; else ordersSkipped++;
-      }
-    });
-    insertAll(rows);
+    console.log(`[orders] sheet="${sheetName}" rows=${rows.length}`);
+    const BATCH = 5000;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH);
+      db.transaction((batch) => {
+        for (const row of batch) {
+          const rec = buildOrderRecord(row);
+          const r = insertOrder.run(rec);
+          if (r.changes > 0) ordersAdded++; else ordersSkipped++;
+        }
+      })(batch);
+      console.log(`[orders] processed ${Math.min(i + BATCH, rows.length)}/${rows.length}`);
+    }
   }
 
   if (hasReturns && !hasOrders) {
