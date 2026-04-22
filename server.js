@@ -12,7 +12,11 @@ const PORT = process.env.PORT || 3001;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const upload = multer({ dest: process.env.UPLOADS_PATH || path.join(__dirname, 'uploads') });
+// Increase timeout to 10 minutes for large file uploads
+const upload = multer({
+  dest: process.env.UPLOADS_PATH || path.join(__dirname, 'uploads'),
+  limits: { fileSize: 200 * 1024 * 1024 } // 200MB max
+});
 
 function parseNum(v) {
   if (v === null || v === undefined || v === '') return null;
@@ -116,6 +120,8 @@ function buildReturnRecord(row) {
 
 // POST /api/upload
 app.post('/api/upload', upload.single('file'), (req, res) => {
+  req.setTimeout(600000); // 10 minutes
+  res.setTimeout(600000);
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   const fHash = fileHash(req.file.path);
@@ -292,6 +298,7 @@ app.get('/api/uploads', (req, res) => {
   res.json(logs);
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n✅ Orders & Returns App running at http://localhost:${PORT}\n`);
 });
+server.setTimeout(600000); // 10 minutes for large uploads
