@@ -152,7 +152,9 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   const hasReturns = wb.SheetNames.includes('Return Raw') || dataType === 'returns';
 
   if (hasOrders) {
-    const rows = readSheet('All Orders Raw');
+    // Try named sheet first, fall back to first sheet
+    const sheetName = wb.SheetNames.includes('All Orders Raw') ? 'All Orders Raw' : wb.SheetNames[0];
+    const rows = readSheet(sheetName);
     const insertAll = db.transaction((rows) => {
       for (const row of rows) {
         const rec = buildOrderRecord(row);
@@ -163,8 +165,10 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     insertAll(rows);
   }
 
-  if (hasReturns) {
-    const rows = readSheet('Return Raw');
+  if (hasReturns && !hasOrders) {
+    // Try named sheet first, fall back to first sheet
+    const sheetName = wb.SheetNames.includes('Return Raw') ? 'Return Raw' : wb.SheetNames[0];
+    const rows = readSheet(sheetName);
     const insertAll = db.transaction((rows) => {
       for (const row of rows) {
         const rec = buildReturnRecord(row);
