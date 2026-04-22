@@ -160,9 +160,10 @@ async function doUpload(type) {
   const name = document.getElementById('uploaderName').value.trim() || 'Team Member';
   const btn = document.getElementById(type + 'Btn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Importing…';
+  btn.innerHTML = '<span class="spinner"></span> Uploading…';
   document.getElementById(type + 'Progress').style.display = 'block';
-  document.getElementById(type + 'Bar').style.width = '30%';
+  document.getElementById(type + 'Bar').style.width = '10%';
+  document.getElementById(type + 'Alert').innerHTML = '';
 
   const form = new FormData();
   form.append('file', files[type]);
@@ -170,37 +171,66 @@ async function doUpload(type) {
   form.append('data_type', type);
 
   try {
-    document.getElementById(type + 'Bar').style.width = '60%';
     const res = await fetch('/api/upload', { method: 'POST', body: form });
-    document.getElementById(type + 'Bar').style.width = '100%';
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
-    const color = type === 'orders' ? '#FF9900' : '#e53e3e';
-    if (data.duplicate_file) {
-      document.getElementById(type + 'Alert').innerHTML = `<div class="alert alert-info">ℹ️ ${data.message}</div>`;
-    } else {
-      const added = type === 'orders' ? data.ordersAdded : data.returnsAdded;
-      const skipped = type === 'orders' ? data.ordersSkipped : data.returnsSkipped;
-      document.getElementById(type + 'Alert').innerHTML = `
-        <div class="alert alert-success">
-          ✅ <strong>${type === 'orders' ? 'Orders' : 'Returns'} imported!</strong><br>
-          <strong>${(added||0).toLocaleString()}</strong> rows added · ${(skipped||0).toLocaleString()} skipped
-          <a href="index.html" style="color:var(--green);font-weight:600;margin-left:8px">View Dashboard →</a>
-        </div>`;
-      files[type] = null;
-      document.getElementById(type + 'Info').style.display = 'none';
-      document.getElementById(type + 'Btn').style.display = 'none';
-      document.getElementById(type + 'Drop').textContent = type === 'orders' ? 'Drop orders file or click to browse' : 'Drop returns file or click to browse';
-      loadHistory();
-    }
+    // File uploaded — now poll for job completion
+    document.getElementById(type + 'Bar').style.width = '20%';
+    btn.innerHTML = '<span class="spinner"></span> Importing…';
+    await pollJob(type, data.jobId);
+
   } catch(e) {
     document.getElementById(type + 'Alert').innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
-  } finally {
     btn.disabled = false;
     btn.innerHTML = type === 'orders' ? 'Upload Orders' : 'Upload Returns';
-    setTimeout(() => { document.getElementById(type + 'Progress').style.display='none'; document.getElementById(type + 'Bar').style.width='0%'; }, 1500);
+    document.getElementById(type + 'Progress').style.display = 'none';
   }
+}
+
+async function pollJob(type, jobId) {
+  const btn = document.getElementById(type + 'Btn');
+  const bar = document.getElementById(type + 'Bar');
+
+  return new Promise((resolve) => {
+    const interval = setInterval(async () => {
+      try {
+        const job = await fetch('/api/job/' + jobId).then(r => r.json());
+        // Update progress bar
+        const pct = Math.max(20, Math.min(95, 20 + (job.progress || 0) * 0.75));
+        bar.style.width = pct + '%';
+
+        if (job.status === 'done') {
+          clearInterval(interval);
+          bar.style.width = '100%';
+          const added = type === 'orders' ? job.ordersAdded : job.returnsAdded;
+          const skipped = type === 'orders' ? job.ordersSkipped : job.returnsSkipped;
+          document.getElementById(type + 'Alert').innerHTML = `
+            <div class="alert alert-success">
+              ✅ <strong>${type === 'orders' ? 'Orders' : 'Returns'} imported!</strong><br>
+              <strong>${(added||0).toLocaleString()}</strong> rows added · ${(skipped||0).toLocaleString()} skipped
+              <a href="index.html" style="color:var(--green);font-weight:600;margin-left:8px">View Dashboard →</a>
+            </div>`;
+          files[type] = null;
+          document.getElementById(type + 'Info').style.display = 'none';
+          document.getElementById(type + 'Btn').style.display = 'none';
+          document.getElementById(type + 'Drop').textContent = type === 'orders' ? 'Drop orders file or click to browse' : 'Drop returns file or click to browse';
+          btn.disabled = false;
+          btn.innerHTML = type === 'orders' ? 'Upload Orders' : 'Upload Returns';
+          setTimeout(() => { document.getElementById(type + 'Progress').style.display='none'; bar.style.width='0%'; }, 2000);
+          loadHistory();
+          resolve();
+        } else if (job.status === 'error') {
+          clearInterval(interval);
+          document.getElementById(type + 'Alert').innerHTML = `<div class="alert alert-error">❌ ${job.error}</div>`;
+          btn.disabled = false;
+          btn.innerHTML = type === 'orders' ? 'Upload Orders' : 'Upload Returns';
+          document.getElementById(type + 'Progress').style.display = 'none';
+          resolve();
+        }
+      } catch(e) { /* keep polling */ }
+    }, 3000); // poll every 3 seconds
+  });
 }
 
 const typeColors = { orders: '#FF9900', returns: '#e53e3e' };

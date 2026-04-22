@@ -118,98 +118,114 @@ function buildReturnRecord(row) {
   };
 }
 
-// POST /api/upload
+// In-memory job store
+const jobs = {};
+
+function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
+  const job = jobs[jobId];
+  try {
+    let wb;
+    try {
+      wb = XLSX.readFile(filePath, { cellDates: false });
+    } catch (e) {
+      job.status = 'error'; job.error = 'Cannot parse file: ' + e.message;
+      try { fs.unlinkSync(filePath); } catch(_) {}
+      return;
+    }
+
+    const readSheet = (name) => {
+      const sheet = wb.Sheets[name] || wb.Sheets[wb.SheetNames[0]];
+      if (!sheet) return [];
+      const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      return raw.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim(), v])));
+    };
+
+    let ordersAdded = 0, ordersSkipped = 0, returnsAdded = 0, returnsSkipped = 0;
+    const hasOrders = wb.SheetNames.includes('All Orders Raw') || dataType === 'orders';
+    const hasReturns = wb.SheetNames.includes('Return Raw') || dataType === 'returns';
+
+    if (hasOrders) {
+      const sheetName = wb.SheetNames.includes('All Orders Raw') ? 'All Orders Raw' : wb.SheetNames[0];
+      const rows = readSheet(sheetName);
+      console.log(`[${jobId}] orders sheet="${sheetName}" rows=${rows.length}`);
+      const BATCH = 5000;
+      for (let i = 0; i < rows.length; i += BATCH) {
+        db.transaction((batch) => {
+          for (const row of batch) {
+            const r = insertOrder.run(buildOrderRecord(row));
+            if (r.changes > 0) ordersAdded++; else ordersSkipped++;
+          }
+        })(rows.slice(i, i + BATCH));
+        job.progress = Math.round((i + BATCH) / rows.length * 100);
+      }
+    }
+
+    if (hasReturns) {
+      const sheetName = wb.SheetNames.includes('Return Raw') ? 'Return Raw' : (hasOrders ? null : wb.SheetNames[0]);
+      if (sheetName) {
+        const rows = readSheet(sheetName);
+        console.log(`[${jobId}] returns sheet="${sheetName}" rows=${rows.length}`);
+        db.transaction((rows) => {
+          for (const row of rows) {
+            const r = insertReturn.run(buildReturnRecord(row));
+            if (r.changes > 0) returnsAdded++; else returnsSkipped++;
+          }
+        })(rows);
+      }
+    }
+
+    if (!hasOrders && !hasReturns) {
+      const rows = readSheet(wb.SheetNames[0]);
+      const firstKey = rows[0] ? Object.keys(rows[0])[0] : '';
+      const isReturn = firstKey.includes('Return') || firstKey.includes('Order ID');
+      db.transaction((rows) => {
+        for (const row of rows) {
+          if (isReturn) {
+            const r = insertReturn.run(buildReturnRecord(row));
+            if (r.changes > 0) returnsAdded++; else returnsSkipped++;
+          } else {
+            const r = insertOrder.run(buildOrderRecord(row));
+            if (r.changes > 0) ordersAdded++; else ordersSkipped++;
+          }
+        }
+      })(rows);
+    }
+
+    const fHash = fileHash(filePath);
+    db.prepare('INSERT OR IGNORE INTO upload_log (filename, file_hash, type, rows_added, rows_skipped, uploaded_by) VALUES (?,?,?,?,?,?)')
+      .run(filename, fHash, dataType, ordersAdded + returnsAdded, ordersSkipped + returnsSkipped, uploadedBy);
+
+    job.status = 'done';
+    job.ordersAdded = ordersAdded; job.ordersSkipped = ordersSkipped;
+    job.returnsAdded = returnsAdded; job.returnsSkipped = returnsSkipped;
+    job.progress = 100;
+    console.log(`[${jobId}] done — orders +${ordersAdded}, returns +${returnsAdded}`);
+  } catch(e) {
+    console.error(`[${jobId}] error:`, e.message);
+    jobs[jobId].status = 'error'; jobs[jobId].error = e.message;
+  } finally {
+    try { fs.unlinkSync(filePath); } catch(_) {}
+  }
+}
+
+// POST /api/upload — responds immediately, processes in background
 app.post('/api/upload', upload.single('file'), (req, res) => {
-  req.setTimeout(600000); // 10 minutes
-  res.setTimeout(600000);
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-  const fHash = fileHash(req.file.path);
-
   const uploadedBy = req.body.uploaded_by || 'Team Member';
   const dataType = req.body.data_type || 'auto';
+  const jobId = crypto.randomBytes(8).toString('hex');
+  jobs[jobId] = { status: 'processing', progress: 0, ordersAdded: 0, ordersSkipped: 0, returnsAdded: 0, returnsSkipped: 0 };
+  // Respond immediately — processing happens in background
+  res.json({ success: true, jobId, processing: true });
+  // Start processing after response is sent
+  setImmediate(() => processFileAsync(req.file.path, dataType, uploadedBy, req.file.originalname, jobId));
+});
 
-  let wb;
-  try {
-    wb = XLSX.readFile(req.file.path, { cellDates: false });
-  } catch (e) {
-    fs.unlinkSync(req.file.path);
-    return res.status(400).json({ error: 'Cannot parse file: ' + e.message });
-  }
-
-  // Read a sheet by name, falling back to the first sheet if not found
-  const readSheet = (name) => {
-    const sheet = wb.Sheets[name] || wb.Sheets[wb.SheetNames[0]];
-    if (!sheet) return [];
-    const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    return raw.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim(), v])));
-  };
-
-  let ordersAdded = 0, ordersSkipped = 0, returnsAdded = 0, returnsSkipped = 0;
-
-  // Detect what's in the file
-  const hasOrders = wb.SheetNames.includes('All Orders Raw') || dataType === 'orders';
-  const hasReturns = wb.SheetNames.includes('Return Raw') || dataType === 'returns';
-
-  if (hasOrders) {
-    // Try named sheet first, fall back to first sheet
-    const sheetName = wb.SheetNames.includes('All Orders Raw') ? 'All Orders Raw' : wb.SheetNames[0];
-    const rows = readSheet(sheetName);
-    console.log(`[orders] sheet="${sheetName}" rows=${rows.length}`);
-    const BATCH = 5000;
-    for (let i = 0; i < rows.length; i += BATCH) {
-      const batch = rows.slice(i, i + BATCH);
-      db.transaction((batch) => {
-        for (const row of batch) {
-          const rec = buildOrderRecord(row);
-          const r = insertOrder.run(rec);
-          if (r.changes > 0) ordersAdded++; else ordersSkipped++;
-        }
-      })(batch);
-      console.log(`[orders] processed ${Math.min(i + BATCH, rows.length)}/${rows.length}`);
-    }
-  }
-
-  if (hasReturns && !hasOrders) {
-    // Try named sheet first, fall back to first sheet
-    const sheetName = wb.SheetNames.includes('Return Raw') ? 'Return Raw' : wb.SheetNames[0];
-    const rows = readSheet(sheetName);
-    const insertAll = db.transaction((rows) => {
-      for (const row of rows) {
-        const rec = buildReturnRecord(row);
-        const r = insertReturn.run(rec);
-        if (r.changes > 0) returnsAdded++; else returnsSkipped++;
-      }
-    });
-    insertAll(rows);
-  }
-
-  // If neither sheet found, try as raw Amazon orders CSV
-  if (!hasOrders && !hasReturns) {
-    const rows = readSheet(wb.SheetNames[0]);
-    const firstKey = rows[0] ? Object.keys(rows[0])[0] : '';
-    const isReturn = firstKey.includes('Return') || firstKey.includes('Order ID');
-    const insertAll = db.transaction((rows) => {
-      for (const row of rows) {
-        if (isReturn) {
-          const rec = buildReturnRecord(row);
-          const r = insertReturn.run(rec);
-          if (r.changes > 0) returnsAdded++; else returnsSkipped++;
-        } else {
-          const rec = buildOrderRecord(row);
-          const r = insertOrder.run(rec);
-          if (r.changes > 0) ordersAdded++; else ordersSkipped++;
-        }
-      }
-    });
-    insertAll(rows);
-  }
-
-  db.prepare('INSERT OR IGNORE INTO upload_log (filename, file_hash, type, rows_added, rows_skipped, uploaded_by) VALUES (?,?,?,?,?,?)')
-    .run(req.file.originalname, fHash, dataType, ordersAdded + returnsAdded, ordersSkipped + returnsSkipped, uploadedBy);
-
-  fs.unlinkSync(req.file.path);
-  res.json({ success: true, ordersAdded, ordersSkipped, returnsAdded, returnsSkipped });
+// GET /api/job/:id — poll for job status
+app.get('/api/job/:id', (req, res) => {
+  const job = jobs[req.params.id];
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
 });
 
 // GET /api/summary
