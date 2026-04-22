@@ -20,145 +20,214 @@
 <div class="main">
   <div class="topbar"><h1>Upload Orders & Returns Data</h1></div>
   <div class="content">
-    <div class="two-col">
-      <div>
-        <div class="card" style="margin-bottom:24px">
-          <div class="card-header">Upload File</div>
-          <div class="card-body">
-            <div id="alertBox"></div>
-            <div style="margin-bottom:16px">
-              <label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px">Your name (optional)</label>
-              <input type="text" id="uploaderName" placeholder="e.g. Maria" style="padding:8px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;width:100%;outline:none" />
-            </div>
-            <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-              <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.txt,.tsv" style="display:none" onchange="handleFile(this.files[0])" />
-              <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-              <div class="upload-title" id="dropTitle">Drop your file here or click to browse</div>
-              <div class="upload-sub">Accepts .xlsx with "All Orders Raw" and/or "Return Raw" sheets</div>
-            </div>
-            <div id="fileInfo" style="display:none;margin-top:14px;padding:12px;background:#f7fafc;border-radius:8px;font-size:13px">
-              <div id="fileName" style="font-weight:600;margin-bottom:4px"></div>
-              <div id="fileSize" style="color:var(--text-muted)"></div>
-            </div>
-            <div id="progressWrap" style="display:none;margin-top:14px">
-              <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Uploading & importing (large files may take a minute)…</div>
-              <div class="progress"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
-            </div>
-            <button class="btn btn-primary" id="uploadBtn" onclick="doUpload()" style="margin-top:18px;width:100%;justify-content:center;display:none">Upload & Import</button>
-          </div>
-        </div>
 
-        <div class="card">
-          <div class="card-header">How to download from Amazon</div>
-          <div class="card-body">
-            <div class="instruction-step">
-              <div class="step-num">1</div>
-              <div class="step-content">
-                <div class="step-title">Orders — Seller Central → Reports → Business Reports</div>
-                <div class="step-desc">Download "Orders" report for your date range. File should contain order-id, purchase-date, item-price, quantity, etc.</div>
-              </div>
-            </div>
-            <div class="instruction-step">
-              <div class="step-num">2</div>
-              <div class="step-content">
-                <div class="step-title">Returns — Reports → Fulfillment → FBA Customer Returns</div>
-                <div class="step-desc">Download the returns report. Contains return-date, reason, disposition, quantity.</div>
-              </div>
-            </div>
-            <div class="instruction-step">
-              <div class="step-num">3</div>
-              <div class="step-content">
-                <div class="step-title">Upload the file here</div>
-                <div class="step-desc">Drop the file above. If it contains both "All Orders Raw" and "Return Raw" sheets, both will be imported automatically. Safe to re-upload — duplicates are skipped.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" style="align-self:start">
-        <div class="card-header">Upload History <button class="btn btn-outline" onclick="loadHistory()" style="font-size:11px;padding:5px 10px">Refresh</button></div>
-        <div class="card-body" id="historyBody"><div class="text-center" style="padding:24px"><span class="spinner"></span></div></div>
+    <!-- Your name -->
+    <div class="card" style="margin-bottom:24px">
+      <div class="card-body" style="padding:16px 20px">
+        <label style="font-size:13px;font-weight:500;margin-bottom:6px;display:block">Your name (optional)</label>
+        <input type="text" id="uploaderName" placeholder="e.g. Maria" style="padding:8px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;width:300px;outline:none" />
       </div>
     </div>
+
+    <div class="two-col">
+
+      <!-- ORDERS UPLOAD -->
+      <div class="card">
+        <div class="card-header" style="background:#fff8ee;border-bottom:2px solid #FF9900">
+          <span style="background:#FF9900;color:#fff;padding:3px 10px;border-radius:5px;font-size:12px;font-weight:700;margin-right:8px">ORDERS</span>
+          Upload Orders File
+        </div>
+        <div class="card-body">
+          <div id="ordersAlert"></div>
+          <div class="upload-zone" id="ordersZone" onclick="document.getElementById('ordersInput').click()">
+            <input type="file" id="ordersInput" accept=".xlsx,.xls,.csv,.txt,.tsv" style="display:none" onchange="handleFile('orders', this.files[0])" />
+            <svg width="36" height="36" fill="none" stroke="#FF9900" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+            <div class="upload-title" id="ordersDrop">Drop orders file or click to browse</div>
+            <div class="upload-sub">File with "All Orders Raw" sheet · .xlsx</div>
+          </div>
+          <div id="ordersInfo" style="display:none;margin-top:12px;padding:10px 12px;background:#fff8ee;border-radius:8px;font-size:13px">
+            <div id="ordersFileName" style="font-weight:600;margin-bottom:2px"></div>
+            <div id="ordersFileSize" style="color:var(--text-muted)"></div>
+          </div>
+          <div id="ordersProgress" style="display:none;margin-top:12px">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Uploading & importing (large files may take a few minutes)…</div>
+            <div class="progress"><div class="progress-bar" id="ordersBar" style="width:0%;background:#FF9900"></div></div>
+          </div>
+          <button class="btn" id="ordersBtn" onclick="doUpload('orders')" style="margin-top:16px;width:100%;justify-content:center;display:none;background:#FF9900;color:#fff;border:none">
+            Upload Orders
+          </button>
+        </div>
+        <div class="card-body" style="border-top:1px solid var(--border);padding-top:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:10px">HOW TO DOWNLOAD</div>
+          <div class="instruction-step" style="margin-bottom:10px">
+            <div class="step-num" style="background:#FF9900">1</div>
+            <div class="step-content">
+              <div class="step-title">Seller Central → Reports → Business Reports</div>
+              <div class="step-desc">Select the "Orders" report for your date range.</div>
+            </div>
+          </div>
+          <div class="instruction-step">
+            <div class="step-num" style="background:#FF9900">2</div>
+            <div class="step-content">
+              <div class="step-title">Download as .xlsx and upload here</div>
+              <div class="step-desc">Must contain an "All Orders Raw" sheet. Duplicates are skipped automatically.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RETURNS UPLOAD -->
+      <div class="card">
+        <div class="card-header" style="background:#fff5f5;border-bottom:2px solid #e53e3e">
+          <span style="background:#e53e3e;color:#fff;padding:3px 10px;border-radius:5px;font-size:12px;font-weight:700;margin-right:8px">RETURNS</span>
+          Upload Returns File
+        </div>
+        <div class="card-body">
+          <div id="returnsAlert"></div>
+          <div class="upload-zone" id="returnsZone" onclick="document.getElementById('returnsInput').click()">
+            <input type="file" id="returnsInput" accept=".xlsx,.xls,.csv,.txt,.tsv" style="display:none" onchange="handleFile('returns', this.files[0])" />
+            <svg width="36" height="36" fill="none" stroke="#e53e3e" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+            <div class="upload-title" id="returnsDrop">Drop returns file or click to browse</div>
+            <div class="upload-sub">File with "Return Raw" sheet · .xlsx</div>
+          </div>
+          <div id="returnsInfo" style="display:none;margin-top:12px;padding:10px 12px;background:#fff5f5;border-radius:8px;font-size:13px">
+            <div id="returnsFileName" style="font-weight:600;margin-bottom:2px"></div>
+            <div id="returnsFileSize" style="color:var(--text-muted)"></div>
+          </div>
+          <div id="returnsProgress" style="display:none;margin-top:12px">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">Uploading & importing…</div>
+            <div class="progress"><div class="progress-bar" id="returnsBar" style="width:0%;background:#e53e3e"></div></div>
+          </div>
+          <button class="btn" id="returnsBtn" onclick="doUpload('returns')" style="margin-top:16px;width:100%;justify-content:center;display:none;background:#e53e3e;color:#fff;border:none">
+            Upload Returns
+          </button>
+        </div>
+        <div class="card-body" style="border-top:1px solid var(--border);padding-top:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:10px">HOW TO DOWNLOAD</div>
+          <div class="instruction-step" style="margin-bottom:10px">
+            <div class="step-num" style="background:#e53e3e">1</div>
+            <div class="step-content">
+              <div class="step-title">Seller Central → Reports → Fulfillment</div>
+              <div class="step-desc">Under "Customer Concessions" click FBA Customer Returns.</div>
+            </div>
+          </div>
+          <div class="instruction-step">
+            <div class="step-num" style="background:#e53e3e">2</div>
+            <div class="step-content">
+              <div class="step-title">Download as .xlsx and upload here</div>
+              <div class="step-desc">Must contain a "Return Raw" sheet. Duplicates are skipped automatically.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Upload History -->
+    <div class="card" style="margin-top:24px">
+      <div class="card-header">Upload History <button class="btn btn-outline" onclick="loadHistory()" style="font-size:11px;padding:5px 10px">Refresh</button></div>
+      <div class="card-body" id="historyBody"><div class="text-center" style="padding:24px"><span class="spinner"></span></div></div>
+    </div>
+
   </div>
 </div>
 
 <script>
-let selectedFile = null;
+const files = { orders: null, returns: null };
 
-const zone = document.getElementById('dropZone');
-zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+// Drag & drop for both zones
+['orders','returns'].forEach(type => {
+  const zone = document.getElementById(type + 'Zone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); if(e.dataTransfer.files[0]) handleFile(type, e.dataTransfer.files[0]); });
+});
 
-function handleFile(file) {
-  selectedFile = file;
-  document.getElementById('dropTitle').textContent = file.name;
-  document.getElementById('fileInfo').style.display = 'block';
-  document.getElementById('fileName').textContent = file.name;
-  document.getElementById('fileSize').textContent = (file.size/1024/1024).toFixed(1) + ' MB';
-  document.getElementById('uploadBtn').style.display = 'flex';
-  document.getElementById('alertBox').innerHTML = '';
+function handleFile(type, file) {
+  if (!file) return;
+  files[type] = file;
+  document.getElementById(type + 'Drop').textContent = file.name;
+  document.getElementById(type + 'Info').style.display = 'block';
+  document.getElementById(type + 'FileName').textContent = file.name;
+  const kb = file.size / 1024;
+  document.getElementById(type + 'FileSize').textContent = kb > 1024 ? (kb/1024).toFixed(1) + ' MB' : kb.toFixed(1) + ' KB';
+  document.getElementById(type + 'Btn').style.display = 'flex';
+  document.getElementById(type + 'Alert').innerHTML = '';
 }
 
-async function doUpload() {
-  if (!selectedFile) return;
-  const btn = document.getElementById('uploadBtn');
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Importing…';
-  document.getElementById('progressWrap').style.display = 'block';
-  document.getElementById('progressBar').style.width = '30%';
+async function doUpload(type) {
+  if (!files[type]) return;
+  const name = document.getElementById('uploaderName').value.trim() || 'Team Member';
+  const btn = document.getElementById(type + 'Btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Importing…';
+  document.getElementById(type + 'Progress').style.display = 'block';
+  document.getElementById(type + 'Bar').style.width = '30%';
 
   const form = new FormData();
-  form.append('file', selectedFile);
-  form.append('uploaded_by', document.getElementById('uploaderName').value.trim() || 'Team Member');
+  form.append('file', files[type]);
+  form.append('uploaded_by', name);
+  form.append('data_type', type);
 
   try {
-    document.getElementById('progressBar').style.width = '60%';
+    document.getElementById(type + 'Bar').style.width = '60%';
     const res = await fetch('/api/upload', { method: 'POST', body: form });
-    document.getElementById('progressBar').style.width = '100%';
+    document.getElementById(type + 'Bar').style.width = '100%';
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
+    const color = type === 'orders' ? '#FF9900' : '#e53e3e';
     if (data.duplicate_file) {
-      document.getElementById('alertBox').innerHTML = `<div class="alert alert-info">ℹ️ ${data.message}</div>`;
+      document.getElementById(type + 'Alert').innerHTML = `<div class="alert alert-info">ℹ️ ${data.message}</div>`;
     } else {
-      document.getElementById('alertBox').innerHTML = `
+      const added = type === 'orders' ? data.ordersAdded : data.returnsAdded;
+      const skipped = type === 'orders' ? data.ordersSkipped : data.returnsSkipped;
+      document.getElementById(type + 'Alert').innerHTML = `
         <div class="alert alert-success">
-          ✅ <strong>Import complete!</strong><br>
-          ${data.ordersAdded > 0 ? `Orders: <strong>${data.ordersAdded.toLocaleString()}</strong> added, ${data.ordersSkipped.toLocaleString()} skipped.<br>` : ''}
-          ${data.returnsAdded > 0 ? `Returns: <strong>${data.returnsAdded.toLocaleString()}</strong> added, ${data.returnsSkipped.toLocaleString()} skipped.` : ''}
+          ✅ <strong>${type === 'orders' ? 'Orders' : 'Returns'} imported!</strong><br>
+          <strong>${(added||0).toLocaleString()}</strong> rows added · ${(skipped||0).toLocaleString()} skipped
           <a href="index.html" style="color:var(--green);font-weight:600;margin-left:8px">View Dashboard →</a>
         </div>`;
-      selectedFile = null;
-      document.getElementById('fileInfo').style.display = 'none';
-      document.getElementById('uploadBtn').style.display = 'none';
-      document.getElementById('dropTitle').textContent = 'Drop your file here or click to browse';
+      files[type] = null;
+      document.getElementById(type + 'Info').style.display = 'none';
+      document.getElementById(type + 'Btn').style.display = 'none';
+      document.getElementById(type + 'Drop').textContent = type === 'orders' ? 'Drop orders file or click to browse' : 'Drop returns file or click to browse';
       loadHistory();
     }
   } catch(e) {
-    document.getElementById('alertBox').innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
+    document.getElementById(type + 'Alert').innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
   } finally {
-    btn.disabled = false; btn.innerHTML = 'Upload & Import';
-    setTimeout(() => { document.getElementById('progressWrap').style.display='none'; document.getElementById('progressBar').style.width='0%'; }, 1500);
+    btn.disabled = false;
+    btn.innerHTML = type === 'orders' ? 'Upload Orders' : 'Upload Returns';
+    setTimeout(() => { document.getElementById(type + 'Progress').style.display='none'; document.getElementById(type + 'Bar').style.width='0%'; }, 1500);
   }
 }
+
+const typeColors = { orders: '#FF9900', returns: '#e53e3e' };
 
 async function loadHistory() {
   const el = document.getElementById('historyBody');
   const logs = await fetch('/api/uploads').then(r => r.json());
   if (!logs.length) { el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">No uploads yet.</div>'; return; }
-  el.innerHTML = logs.map(l => `
-    <div class="upload-history-item">
-      <div>
-        <div style="font-weight:500;font-size:13px">${l.filename}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">by ${l.uploaded_by} · ${new Date(l.uploaded_at).toLocaleString()}</div>
-      </div>
-      <div style="text-align:right;font-size:12px">
-        <div style="color:var(--green);font-weight:600">+${l.rows_added.toLocaleString()}</div>
-        <div style="color:var(--text-muted)">${l.rows_skipped.toLocaleString()} skipped</div>
-      </div>
-    </div>`).join('');
+  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;padding:4px">` +
+    logs.map(l => {
+      const color = typeColors[l.type] || '#a0aec0';
+      const label = l.type === 'orders' ? 'ORDERS' : l.type === 'returns' ? 'RETURNS' : (l.type||'').toUpperCase();
+      return `
+      <div class="upload-history-item">
+        <div>
+          <div style="font-weight:500;font-size:13px">
+            <span style="background:${color};color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;margin-right:6px">${label}</span>
+            ${l.filename}
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">by ${l.uploaded_by} · ${new Date(l.uploaded_at).toLocaleString()}</div>
+        </div>
+        <div style="text-align:right;font-size:12px;flex-shrink:0">
+          <div style="color:var(--green);font-weight:600">+${l.rows_added.toLocaleString()}</div>
+          <div style="color:var(--text-muted)">${l.rows_skipped.toLocaleString()} skipped</div>
+        </div>
+      </div>`;
+    }).join('') + `</div>`;
 }
 
 loadHistory();
