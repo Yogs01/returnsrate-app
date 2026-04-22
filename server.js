@@ -125,11 +125,6 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   const fHash = fileHash(req.file.path);
-  const already = db.prepare('SELECT filename, uploaded_at FROM upload_log WHERE file_hash = ?').get(fHash);
-  if (already) {
-    fs.unlinkSync(req.file.path);
-    return res.json({ success: true, added: 0, skipped: 0, total: 0, duplicate_file: true, message: `Already uploaded: ${already.filename}` });
-  }
 
   const uploadedBy = req.body.uploaded_by || 'Team Member';
   const dataType = req.body.data_type || 'auto';
@@ -142,9 +137,11 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     return res.status(400).json({ error: 'Cannot parse file: ' + e.message });
   }
 
+  // Read a sheet by name, falling back to the first sheet if not found
   const readSheet = (name) => {
-    if (!wb.SheetNames.includes(name)) return [];
-    const raw = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '' });
+    const sheet = wb.Sheets[name] || wb.Sheets[wb.SheetNames[0]];
+    if (!sheet) return [];
+    const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });
     return raw.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim(), v])));
   };
 
@@ -296,6 +293,12 @@ app.get('/api/filters', (req, res) => {
 app.get('/api/uploads', (req, res) => {
   const logs = db.prepare('SELECT * FROM upload_log ORDER BY uploaded_at DESC LIMIT 50').all();
   res.json(logs);
+});
+
+// DELETE /api/uploads/reset — clears upload log so files can be re-imported
+app.delete('/api/uploads/reset', (req, res) => {
+  db.prepare('DELETE FROM upload_log').run();
+  res.json({ success: true });
 });
 
 const server = app.listen(PORT, () => {
