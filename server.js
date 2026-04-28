@@ -279,24 +279,25 @@ app.get('/api/period-stats', (req, res) => {
     if (!om.length) return { orders_units: 0, returns_total: 0, sellable: 0, unsellable: 0, dispositions: [] };
     const inP = om.map(() => '?').join(',');
 
+    // Match Excel: SUM(quantity) for all statuses except 'On Trial' (Cancelled has qty=0 so no effect)
     const orders_units = db.prepare(`
       SELECT SUM(quantity) as v FROM orders
-      WHERE strftime('%Y-%m', purchase_date) IN (${inP}) AND order_status='Shipped'
+      WHERE strftime('%Y-%m', purchase_date) IN (${inP}) AND order_status != 'On Trial'
     `).get(...om)?.v || 0;
 
-    // JOIN returns → orders by Order ID so returns fall to the purchase month of the original order
+    // Returns: use SUM(r.quantity) to match Excel's Return Qty calculation
     const ret = db.prepare(`
       SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN r.disposition='SELLABLE' THEN 1 ELSE 0 END) as sellable,
-        SUM(CASE WHEN r.disposition!='' AND r.disposition!='SELLABLE' THEN 1 ELSE 0 END) as unsellable
+        SUM(r.quantity) as total,
+        SUM(CASE WHEN r.disposition='SELLABLE' THEN r.quantity ELSE 0 END) as sellable,
+        SUM(CASE WHEN r.disposition!='' AND r.disposition!='SELLABLE' THEN r.quantity ELSE 0 END) as unsellable
       FROM returns r
       JOIN orders o ON r.order_id = o.amazon_order_id
       WHERE strftime('%Y-%m', o.purchase_date) IN (${inP})
     `).get(...om);
 
     const dispositions = db.prepare(`
-      SELECT r.disposition, COUNT(*) as count
+      SELECT r.disposition, SUM(r.quantity) as count
       FROM returns r
       JOIN orders o ON r.order_id = o.amazon_order_id
       WHERE strftime('%Y-%m', o.purchase_date) IN (${inP})
@@ -322,15 +323,22 @@ app.get('/api/period-stats', (req, res) => {
 
 // GET /api/summary
 app.get('/api/summary', (req, res) => {
-  const orderStats = db.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN order_status='Shipped' THEN 1 ELSE 0 END) as shipped, SUM(CASE WHEN order_status='Cancelled' THEN 1 ELSE 0 END) as cancelled, SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue, SUM(CASE WHEN order_status='Shipped' THEN quantity ELSE 0 END) as units FROM orders`).get();
+  // Match Excel: count/sum all orders except 'On Trial'. Cancelled has qty=0 so doesn't affect units.
+  const orderStats = db.prepare(`SELECT
+    COUNT(*) as total,
+    SUM(CASE WHEN order_status='Shipped' THEN 1 ELSE 0 END) as shipped,
+    SUM(CASE WHEN order_status='Cancelled' THEN 1 ELSE 0 END) as cancelled,
+    SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue,
+    SUM(CASE WHEN order_status != 'On Trial' THEN quantity ELSE 0 END) as units
+  FROM orders`).get();
   const returnStats = db.prepare(`SELECT COUNT(*) as total, SUM(quantity) as units FROM returns`).get();
 
   // Orders by purchase month
   const monthlyOrders = db.prepare(`
     SELECT strftime('%Y-%m', purchase_date) as month, MIN(purchase_date) as month_start,
-      COUNT(CASE WHEN order_status='Shipped' THEN 1 END) as orders,
+      SUM(CASE WHEN order_status != 'On Trial' THEN quantity ELSE 0 END) as orders,
       SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue,
-      SUM(CASE WHEN order_status='Shipped' THEN quantity ELSE 0 END) as units,
+      SUM(CASE WHEN order_status != 'On Trial' THEN quantity ELSE 0 END) as units,
       COUNT(CASE WHEN order_status='Cancelled' THEN 1 END) as cancelled
     FROM orders WHERE purchase_date != '' AND purchase_date IS NOT NULL
     GROUP BY month ORDER BY month ASC
@@ -338,7 +346,7 @@ app.get('/api/summary', (req, res) => {
   // Returns attributed to PURCHASE MONTH of the original order via Order ID join
   const monthlyReturns = db.prepare(`
     SELECT strftime('%Y-%m', o.purchase_date) as month,
-      COUNT(*) as return_count, SUM(r.quantity) as return_units
+      SUM(r.quantity) as return_count, SUM(r.quantity) as return_units
     FROM returns r
     JOIN orders o ON r.order_id = o.amazon_order_id
     WHERE o.purchase_date != '' AND o.purchase_date IS NOT NULL
