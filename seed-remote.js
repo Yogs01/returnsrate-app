@@ -10,7 +10,7 @@ const https = require('https');
 
 const FILE   = 'C:/Users/Reynaldo Macinas Jr/Downloads/orders.xlsx';
 const HOST   = 'returnsrate-app-production.up.railway.app';
-const BATCH  = 2000;   // rows per POST
+const BATCH  = 500;    // rows per POST (smaller = safer, avoids body size issues)
 const CONCUR = 1;      // one batch at a time (safe)
 
 function parseNum(v) {
@@ -101,17 +101,20 @@ async function run() {
     process.stdout.write(`Batch ${batchNum}/${batches} (rows ${i+1}-${Math.min(i+BATCH, records.length)})... `);
     try {
       const result = await postJSON('/api/import-orders', { rows: batch });
-      totalAdded   += result.added   || 0;
-      totalSkipped += result.skipped || 0;
-      console.log(`+${result.added} added, ${result.skipped} skipped`);
+      const a = result.added ?? result.ordersAdded ?? 0;
+      const s = result.skipped ?? result.ordersSkipped ?? 0;
+      totalAdded   += a;
+      totalSkipped += s;
+      console.log(`+${a} added, ${s} skipped`);
     } catch(e) {
       console.log(`ERROR: ${e.message} — retrying...`);
-      // retry once
       try {
         const result = await postJSON('/api/import-orders', { rows: batch });
-        totalAdded   += result.added   || 0;
-        totalSkipped += result.skipped || 0;
-        console.log(`retry ok: +${result.added} added`);
+        const a = result.added ?? result.ordersAdded ?? 0;
+        const s = result.skipped ?? result.ordersSkipped ?? 0;
+        totalAdded   += a;
+        totalSkipped += s;
+        console.log(`retry ok: +${a} added`);
       } catch(e2) {
         console.log(`retry failed: ${e2.message}`);
       }
