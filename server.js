@@ -425,6 +425,15 @@ app.delete('/api/uploads/reset', (req, res) => {
   res.json({ success: true });
 });
 
+// DELETE /api/returns/cleanup-empty-disposition — removes old returns rows that have no disposition
+// (leftover from earlier uploads before disposition was captured correctly)
+app.delete('/api/returns/cleanup-empty-disposition', (req, res) => {
+  const before = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
+  db.prepare("DELETE FROM returns WHERE disposition IS NULL OR disposition = ''").run();
+  const after = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
+  res.json({ deleted: before - after, remaining: after });
+});
+
 const server = app.listen(PORT, () => {
   console.log(`\n✅ Orders & Returns App running at http://localhost:${PORT}\n`);
 });
