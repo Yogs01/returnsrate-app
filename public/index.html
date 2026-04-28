@@ -5,6 +5,78 @@
   <title>Orders & Returns Dashboard</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* Period stats table */
+    .period-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+
+    .period-table thead th {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 12px 18px;
+      text-align: right;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      border-bottom: 2px solid var(--brand);
+    }
+    .period-table thead th:first-child { text-align: left; }
+
+    /* Section header rows */
+    .period-table tr.section-header td {
+      background: #f0f4f8;
+      font-weight: 700;
+      font-size: 13px;
+      padding: 10px 18px;
+      border-top: 2px solid var(--border);
+      color: var(--text);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    /* Main metric rows */
+    .period-table tr.metric-row td {
+      padding: 11px 18px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    /* Sub / percentage rows */
+    .period-table tr.sub-row td {
+      padding: 6px 18px 6px 32px;
+      border-bottom: 1px solid #f0f4f8;
+      font-size: 12.5px;
+      color: var(--text-muted);
+    }
+
+    /* Disposition name row */
+    .period-table tr.disp-row td {
+      padding: 9px 18px 9px 28px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .period-table td.label-col { text-align: left; }
+    .period-table td.val-col   { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* Highlight colors for key rates */
+    .rate-orange  { color: #c77700; font-weight: 600; }
+    .rate-red     { color: var(--red); font-weight: 600; }
+    .rate-green   { color: var(--green); font-weight: 600; }
+    .rate-blue    { color: var(--blue); font-weight: 600; }
+    .val-big      { font-size: 15px; font-weight: 700; }
+
+    .period-table tbody tr:hover td { background: #fafbff; }
+
+    .period-range {
+      font-size: 11px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.55);
+      display: block;
+      margin-top: 2px;
+    }
+  </style>
 </head>
 <body>
 <aside class="sidebar">
@@ -43,13 +115,30 @@
   </div>
   <div class="content">
 
-    <div class="stat-grid">
-      <div class="stat-card"><div class="label">Total Orders (Shipped)</div><div class="value brand" id="sOrders">—</div><div class="sub" id="sUnits">— units</div></div>
-      <div class="stat-card"><div class="label">Total Revenue</div><div class="value green" id="sRevenue">—</div><div class="sub">Shipped orders only</div></div>
-      <div class="stat-card"><div class="label">Total Returns</div><div class="value red" id="sReturns">—</div><div class="sub" id="sReturnUnits">— units returned</div></div>
-      <div class="stat-card"><div class="label">Overall Return Rate</div><div class="value" id="sReturnRate">—</div><div class="sub">Returns / Orders</div></div>
+    <!-- Period Comparison Table -->
+    <div class="card" style="margin-bottom:28px">
+      <div class="card-header" style="justify-content:space-between;align-items:center">
+        <span>Performance Summary</span>
+        <span id="periodNote" style="font-size:11px;color:var(--text-muted);font-weight:400"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="period-table">
+          <thead>
+            <tr>
+              <th style="width:38%;text-align:left">Metric</th>
+              <th>Last Month<span class="period-range" id="lmLabel"></span></th>
+              <th>3 Months<span class="period-range" id="t3Label"></span></th>
+              <th>12 Months<span class="period-range" id="t12Label"></span></th>
+            </tr>
+          </thead>
+          <tbody id="periodTbody">
+            <tr><td colspan="4" class="text-center" style="padding:32px"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
+    <!-- Charts row -->
     <div class="two-col">
       <div class="card">
         <div class="card-header">Monthly Orders vs Returns</div>
@@ -72,93 +161,159 @@
       </div>
     </div>
 
-    <div class="two-col">
-      <div class="card">
-        <div class="card-header">Top Brands by Returns</div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Brand</th><th class="text-right">Returns</th><th class="text-right">Units</th></tr></thead>
-            <tbody id="brandTable"><tr><td colspan="3" class="text-center" style="padding:24px"><span class="spinner"></span></td></tr></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header">Returns by Gender</div>
-        <div class="card-body"><div class="chart-container" style="height:220px"><canvas id="genderChart"></canvas></div></div>
-      </div>
-    </div>
-
   </div>
 </div>
 
 <script>
-const fmt = n => n == null ? '—' : '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-const fmtPct = n => n == null ? '—' : (n*100).toFixed(1) + '%';
+const n = v => (v == null ? '—' : Number(v).toLocaleString());
+const pct = (num, den) => (!den || !num) ? '—' : (num / den * 100).toFixed(1) + '%';
+
+function buildPeriodTable(data) {
+  const { lastMonth: lm, last3Months: t3, last12Months: t12 } = data;
+  const cols = [lm, t3, t12];
+
+  // Collect all disposition names (unsellable only) across all periods
+  const dispNames = [];
+  const seen = new Set();
+  [t12, t3, lm].forEach(p => {
+    (p?.dispositions || []).forEach(d => {
+      if (!seen.has(d.disposition)) { seen.add(d.disposition); dispNames.push(d.disposition); }
+    });
+  });
+
+  // Helper: get disp count for a period
+  const dispCount = (p, name) => p?.dispositions?.find(d => d.disposition === name)?.count || 0;
+
+  // Format disposition label nicely
+  const fmtDisp = d => d.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+
+  const rows = [];
+
+  // ── ORDERS ──────────────────────────────────────────────────────────
+  rows.push({ type:'section', label:'Orders' });
+  rows.push({
+    type: 'metric', label: 'Orders (units)',
+    vals: cols.map(p => `<span class="val-big">${n(p?.orders_units)}</span>`)
+  });
+
+  // ── RETURNS ─────────────────────────────────────────────────────────
+  rows.push({ type:'section', label:'Returns' });
+  rows.push({
+    type: 'metric', label: 'Returns',
+    vals: cols.map(p => `<span class="val-big">${n(p?.returns_total)}</span>`)
+  });
+  rows.push({
+    type: 'sub', label: '% of Orders',
+    vals: cols.map(p => `<span class="rate-orange">${pct(p?.returns_total, p?.orders_units)}</span>`)
+  });
+
+  // ── UNSELLABLE ───────────────────────────────────────────────────────
+  rows.push({ type:'section', label:'Unsellable Returns' });
+  rows.push({
+    type: 'metric', label: 'Unsellable',
+    vals: cols.map(p => `<span class="val-big">${n(p?.unsellable)}</span>`)
+  });
+  rows.push({
+    type: 'sub', label: '% of Orders',
+    vals: cols.map(p => `<span class="rate-orange">${pct(p?.unsellable, p?.orders_units)}</span>`)
+  });
+  rows.push({
+    type: 'sub', label: '% of Returns',
+    vals: cols.map(p => `<span class="rate-orange">${pct(p?.unsellable, p?.returns_total)}</span>`)
+  });
+
+  // Disposition sub-rows
+  dispNames.forEach(disp => {
+    rows.push({
+      type: 'disp', label: fmtDisp(disp),
+      vals: cols.map(p => `<strong>${n(dispCount(p, disp))}</strong>`)
+    });
+    rows.push({
+      type: 'sub', label: '% of Returns',
+      vals: cols.map(p => `<span class="rate-red">${pct(dispCount(p, disp), p?.returns_total)}</span>`)
+    });
+    rows.push({
+      type: 'sub', label: '% of Unsellable',
+      vals: cols.map(p => `<span class="rate-red">${pct(dispCount(p, disp), p?.unsellable)}</span>`)
+    });
+  });
+
+  // ── SELLABLE ─────────────────────────────────────────────────────────
+  rows.push({ type:'section', label:'Sellable Returns' });
+  rows.push({
+    type: 'metric', label: 'Sellable',
+    vals: cols.map(p => `<span class="val-big">${n(p?.sellable)}</span>`)
+  });
+  rows.push({
+    type: 'sub', label: '% of Orders',
+    vals: cols.map(p => `<span class="rate-green">${pct(p?.sellable, p?.orders_units)}</span>`)
+  });
+  rows.push({
+    type: 'sub', label: '% of Returns',
+    vals: cols.map(p => `<span class="rate-green">${pct(p?.sellable, p?.returns_total)}</span>`)
+  });
+
+  // Render
+  const tbody = document.getElementById('periodTbody');
+  tbody.innerHTML = rows.map(r => {
+    if (r.type === 'section') {
+      return `<tr class="section-header"><td colspan="4" class="label-col">${r.label}</td></tr>`;
+    }
+    const trClass = r.type === 'sub' ? 'sub-row' : r.type === 'disp' ? 'disp-row' : 'metric-row';
+    return `<tr class="${trClass}">
+      <td class="label-col">${r.label}</td>
+      ${r.vals.map(v => `<td class="val-col">${v}</td>`).join('')}
+    </tr>`;
+  }).join('');
+}
 
 async function load() {
-  const d = await fetch('/api/summary').then(r => r.json());
-  const { orderStats, returnStats, monthly, weekly, byReason, byDisposition, byBrand, byGender } = d;
+  const [d, periods] = await Promise.all([
+    fetch('/api/summary').then(r => r.json()),
+    fetch('/api/period-stats').then(r => r.json()),
+  ]);
 
-  document.getElementById('sOrders').textContent = (orderStats.shipped||0).toLocaleString();
-  document.getElementById('sUnits').textContent = (orderStats.units||0).toLocaleString() + ' units';
-  document.getElementById('sRevenue').textContent = fmt(orderStats.revenue);
-  document.getElementById('sReturns').textContent = (returnStats.total||0).toLocaleString();
-  document.getElementById('sReturnUnits').textContent = (returnStats.units||0).toLocaleString() + ' units returned';
-  const rate = orderStats.shipped ? returnStats.total / orderStats.shipped : 0;
-  document.getElementById('sReturnRate').textContent = fmtPct(rate);
+  buildPeriodTable(periods);
 
-  // Monthly orders vs returns
-  const last18 = monthly.slice(-18);
+  // Monthly chart data
+  const last18 = d.monthly.slice(-18);
   new Chart(document.getElementById('monthlyChart'), {
     type: 'bar',
     data: {
-      labels: last18.map(m => m.month?.replace(/-\d{4}/,'')),
+      labels: last18.map(m => m.month?.replace(/-\d{4}/, '')),
       datasets: [
         { label: 'Orders', data: last18.map(m => m.orders), backgroundColor: '#FF9900', borderRadius: 3, stack: 'a' },
         { label: 'Returns', data: last18.map(m => m.returns), backgroundColor: '#e53e3e', borderRadius: 3, stack: 'b' },
       ]
     },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}, scales:{x:{ticks:{font:{size:10},maxRotation:45}}} }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45 } } } }
   });
 
-  // Return rate line
   new Chart(document.getElementById('rateChart'), {
     type: 'line',
     data: {
-      labels: last18.map(m => m.month?.replace(/-\d{4}/,'')),
-      datasets: [{ label: 'Return Rate %', data: last18.map(m => m.orders > 0 ? +((m.returns/m.orders)*100).toFixed(2) : 0), borderColor: '#e53e3e', backgroundColor: 'rgba(229,62,62,0.08)', tension: 0.3, fill: true, pointRadius: 3 }]
+      labels: last18.map(m => m.month?.replace(/-\d{4}/, '')),
+      datasets: [{ label: 'Return Rate %', data: last18.map(m => m.orders > 0 ? +((m.returns / m.orders) * 100).toFixed(2) : 0), borderColor: '#e53e3e', backgroundColor: 'rgba(229,62,62,0.08)', tension: 0.3, fill: true, pointRadius: 3 }]
     },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:10},maxRotation:45}}, y:{ticks:{callback:v=>v+'%'}}} }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45 } }, y: { ticks: { callback: v => v + '%' } } } }
   });
 
-  // Reason bar
-  const top10 = byReason.slice(0,10);
+  const top10 = d.byReason.slice(0, 10);
   new Chart(document.getElementById('reasonChart'), {
     type: 'bar',
-    data: { labels: top10.map(r => r.reason.replace(/_/g,' ')), datasets: [{ data: top10.map(r => r.count), backgroundColor: '#3182ce', borderRadius: 3 }] },
-    options: { indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{font:{size:10}}}, y:{ticks:{font:{size:10}}}} }
+    data: { labels: top10.map(r => r.reason.replace(/_/g, ' ')), datasets: [{ data: top10.map(r => r.count), backgroundColor: '#3182ce', borderRadius: 3 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
   });
 
-  // Disposition doughnut
-  const dispColors = { SELLABLE:'#38a169', CUSTOMER_DAMAGED:'#e53e3e', CARRIER_DAMAGED:'#dd6b20', DAMAGED:'#fc8181', DEFECTIVE:'#9f7aea' };
+  const dispColors = { SELLABLE: '#38a169', CUSTOMER_DAMAGED: '#e53e3e', CARRIER_DAMAGED: '#dd6b20', DAMAGED: '#fc8181', DEFECTIVE: '#9f7aea' };
   new Chart(document.getElementById('dispositionChart'), {
     type: 'doughnut',
-    data: { labels: byDisposition.map(d => d.disposition), datasets: [{ data: byDisposition.map(d => d.count), backgroundColor: byDisposition.map(d => dispColors[d.disposition]||'#a0aec0') }] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}} }
-  });
-
-  // Brand table
-  const tb = document.getElementById('brandTable');
-  tb.innerHTML = byBrand.length ? byBrand.map(b => `<tr><td style="font-weight:500">${b.brand}</td><td class="text-right">${b.count.toLocaleString()}</td><td class="text-right">${(b.units||0).toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="3" class="text-center" style="padding:24px;color:var(--text-muted)">No data yet.</td></tr>';
-
-  // Gender doughnut
-  new Chart(document.getElementById('genderChart'), {
-    type: 'doughnut',
-    data: { labels: byGender.map(g => g.gender||'Unknown'), datasets: [{ data: byGender.map(g => g.count), backgroundColor: ['#3182ce','#e53e3e','#38a169','#a0aec0'] }] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}} }
+    data: { labels: d.byDisposition.map(x => x.disposition), datasets: [{ data: d.byDisposition.map(x => x.count), backgroundColor: d.byDisposition.map(x => dispColors[x.disposition] || '#a0aec0') }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } }
   });
 }
 
 load();
 </script>
-</body></html>
+</body>
+</html>

@@ -242,6 +242,41 @@ app.get('/api/job/:id', (req, res) => {
   res.json(job);
 });
 
+// GET /api/period-stats — Last Month / 3 Months / 12 Months breakdown
+app.get('/api/period-stats', (req, res) => {
+  const oMonths = db.prepare(`SELECT DISTINCT purchase_month FROM orders WHERE purchase_month != '' ORDER BY MIN(purchase_date) DESC`).all().map(r => r.purchase_month);
+  const rMonths = db.prepare(`SELECT DISTINCT return_month FROM returns WHERE return_month != '' ORDER BY MIN(return_date) DESC`).all().map(r => r.return_month);
+
+  function calc(om, rm) {
+    const oIn = om.length ? om.map(() => '?').join(',') : null;
+    const rIn = rm.length ? rm.map(() => '?').join(',') : null;
+
+    const orders_units = oIn
+      ? (db.prepare(`SELECT SUM(quantity) as v FROM orders WHERE purchase_month IN (${oIn}) AND order_status='Shipped'`).get(...om)?.v || 0)
+      : 0;
+    const returns_total = rIn
+      ? (db.prepare(`SELECT COUNT(*) as v FROM returns WHERE return_month IN (${rIn})`).get(...rm)?.v || 0)
+      : 0;
+    const sellable = rIn
+      ? (db.prepare(`SELECT COUNT(*) as v FROM returns WHERE return_month IN (${rIn}) AND disposition='SELLABLE'`).get(...rm)?.v || 0)
+      : 0;
+    const unsellable = rIn
+      ? (db.prepare(`SELECT COUNT(*) as v FROM returns WHERE return_month IN (${rIn}) AND disposition!='SELLABLE' AND disposition!=''`).get(...rm)?.v || 0)
+      : 0;
+    const dispositions = rIn
+      ? db.prepare(`SELECT disposition, COUNT(*) as count FROM returns WHERE return_month IN (${rIn}) AND disposition!='' AND disposition!='SELLABLE' GROUP BY disposition ORDER BY count DESC`).all(...rm)
+      : [];
+
+    return { orders_units, returns_total, sellable, unsellable, dispositions };
+  }
+
+  res.json({
+    lastMonth:   calc(oMonths.slice(0, 1),  rMonths.slice(0, 1)),
+    last3Months: calc(oMonths.slice(0, 3),  rMonths.slice(0, 3)),
+    last12Months: calc(oMonths.slice(0, 12), rMonths.slice(0, 12)),
+  });
+});
+
 // GET /api/summary
 app.get('/api/summary', (req, res) => {
   const orderStats = db.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN order_status='Shipped' THEN 1 ELSE 0 END) as shipped, SUM(CASE WHEN order_status='Cancelled' THEN 1 ELSE 0 END) as cancelled, SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue, SUM(CASE WHEN order_status='Shipped' THEN quantity ELSE 0 END) as units FROM orders`).get();
