@@ -221,6 +221,30 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   setImmediate(() => processFileAsync(req.file.path, dataType, uploadedBy, req.file.originalname, jobId));
 });
 
+// POST /api/import-returns — accepts pre-built JSON rows (used by seed-returns-remote.js)
+// Inserts new rows OR updates disposition on existing rows (fixes empty disposition)
+const updateReturnDisposition = db.prepare(`
+  UPDATE returns SET disposition=@disposition WHERE row_hash=@row_hash AND (disposition IS NULL OR disposition='')
+`);
+app.post('/api/import-returns', (req, res) => {
+  const rows = req.body.rows;
+  if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows array required' });
+  let added = 0, updated = 0, skipped = 0;
+  db.transaction((rows) => {
+    for (const rec of rows) {
+      const r = insertReturn.run(rec);
+      if (r.changes > 0) {
+        added++;
+      } else {
+        // Row exists — update disposition if it was blank
+        const u = updateReturnDisposition.run({ disposition: rec.disposition, row_hash: rec.row_hash });
+        if (u.changes > 0) updated++; else skipped++;
+      }
+    }
+  })(rows);
+  res.json({ added, updated, skipped });
+});
+
 // POST /api/import-orders — accepts pre-built JSON rows (used by seed-remote.js)
 app.post('/api/import-orders', (req, res) => {
   const rows = req.body.rows;
@@ -243,47 +267,56 @@ app.get('/api/job/:id', (req, res) => {
 });
 
 // GET /api/period-stats — Last Month / 3 Months / 12 Months breakdown
+// Returns are attributed to the PURCHASE MONTH of the original order (matched via Order ID)
 app.get('/api/period-stats', (req, res) => {
-  // Use strftime on actual date fields — more reliable than the month text columns
   const oMonths = db.prepare(`
     SELECT strftime('%Y-%m', purchase_date) as month FROM orders
     WHERE purchase_date != '' AND purchase_date IS NOT NULL
     GROUP BY month ORDER BY month DESC
   `).all().map(r => r.month).filter(Boolean);
 
-  const rMonths = db.prepare(`
-    SELECT strftime('%Y-%m', return_date) as month FROM returns
-    WHERE return_date != '' AND return_date IS NOT NULL
-    GROUP BY month ORDER BY month DESC
-  `).all().map(r => r.month).filter(Boolean);
+  function calc(om) {
+    if (!om.length) return { orders_units: 0, returns_total: 0, sellable: 0, unsellable: 0, dispositions: [] };
+    const inP = om.map(() => '?').join(',');
 
-  function calc(om, rm) {
-    const oIn = om.length ? om.map(() => '?').join(',') : null;
-    const rIn = rm.length ? rm.map(() => '?').join(',') : null;
+    const orders_units = db.prepare(`
+      SELECT SUM(quantity) as v FROM orders
+      WHERE strftime('%Y-%m', purchase_date) IN (${inP}) AND order_status='Shipped'
+    `).get(...om)?.v || 0;
 
-    const orders_units = oIn
-      ? (db.prepare(`SELECT SUM(quantity) as v FROM orders WHERE strftime('%Y-%m',purchase_date) IN (${oIn}) AND order_status='Shipped'`).get(...om)?.v || 0)
-      : 0;
-    const returns_total = rIn
-      ? (db.prepare(`SELECT COUNT(*) as v FROM returns WHERE strftime('%Y-%m',return_date) IN (${rIn})`).get(...rm)?.v || 0)
-      : 0;
-    const sellable = rIn
-      ? (db.prepare(`SELECT COUNT(*) as v FROM returns WHERE strftime('%Y-%m',return_date) IN (${rIn}) AND disposition='SELLABLE'`).get(...rm)?.v || 0)
-      : 0;
-    const unsellable = rIn
-      ? (db.prepare(`SELECT COUNT(*) as v FROM returns WHERE strftime('%Y-%m',return_date) IN (${rIn}) AND disposition!='SELLABLE' AND disposition!=''`).get(...rm)?.v || 0)
-      : 0;
-    const dispositions = rIn
-      ? db.prepare(`SELECT disposition, COUNT(*) as count FROM returns WHERE strftime('%Y-%m',return_date) IN (${rIn}) AND disposition!='' AND disposition!='SELLABLE' GROUP BY disposition ORDER BY count DESC`).all(...rm)
-      : [];
+    // JOIN returns → orders by Order ID so returns fall to the purchase month of the original order
+    const ret = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN r.disposition='SELLABLE' THEN 1 ELSE 0 END) as sellable,
+        SUM(CASE WHEN r.disposition!='' AND r.disposition!='SELLABLE' THEN 1 ELSE 0 END) as unsellable
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id
+      WHERE strftime('%Y-%m', o.purchase_date) IN (${inP})
+    `).get(...om);
 
-    return { orders_units, returns_total, sellable, unsellable, dispositions };
+    const dispositions = db.prepare(`
+      SELECT r.disposition, COUNT(*) as count
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id
+      WHERE strftime('%Y-%m', o.purchase_date) IN (${inP})
+        AND r.disposition != '' AND r.disposition != 'SELLABLE'
+      GROUP BY r.disposition ORDER BY count DESC
+    `).all(...om);
+
+    return {
+      orders_units,
+      returns_total: ret?.total || 0,
+      sellable:      ret?.sellable || 0,
+      unsellable:    ret?.unsellable || 0,
+      dispositions
+    };
   }
 
   res.json({
-    lastMonth:    calc(oMonths.slice(0, 1),  rMonths.slice(0, 1)),
-    last3Months:  calc(oMonths.slice(0, 3),  rMonths.slice(0, 3)),
-    last12Months: calc(oMonths.slice(0, 12), rMonths.slice(0, 12)),
+    lastMonth:    calc(oMonths.slice(0, 1)),
+    last3Months:  calc(oMonths.slice(0, 3)),
+    last12Months: calc(oMonths.slice(0, 12)),
   });
 });
 
@@ -292,7 +325,7 @@ app.get('/api/summary', (req, res) => {
   const orderStats = db.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN order_status='Shipped' THEN 1 ELSE 0 END) as shipped, SUM(CASE WHEN order_status='Cancelled' THEN 1 ELSE 0 END) as cancelled, SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue, SUM(CASE WHEN order_status='Shipped' THEN quantity ELSE 0 END) as units FROM orders`).get();
   const returnStats = db.prepare(`SELECT COUNT(*) as total, SUM(quantity) as units FROM returns`).get();
 
-  // Use strftime on actual date fields so both orders and returns use same YYYY-MM key
+  // Orders by purchase month
   const monthlyOrders = db.prepare(`
     SELECT strftime('%Y-%m', purchase_date) as month, MIN(purchase_date) as month_start,
       COUNT(CASE WHEN order_status='Shipped' THEN 1 END) as orders,
@@ -302,9 +335,14 @@ app.get('/api/summary', (req, res) => {
     FROM orders WHERE purchase_date != '' AND purchase_date IS NOT NULL
     GROUP BY month ORDER BY month ASC
   `).all();
+  // Returns attributed to PURCHASE MONTH of the original order via Order ID join
   const monthlyReturns = db.prepare(`
-    SELECT strftime('%Y-%m', return_date) as month, COUNT(*) as return_count, SUM(quantity) as return_units
-    FROM returns WHERE return_date != '' AND return_date IS NOT NULL GROUP BY month
+    SELECT strftime('%Y-%m', o.purchase_date) as month,
+      COUNT(*) as return_count, SUM(r.quantity) as return_units
+    FROM returns r
+    JOIN orders o ON r.order_id = o.amazon_order_id
+    WHERE o.purchase_date != '' AND o.purchase_date IS NOT NULL
+    GROUP BY month
   `).all();
   const rMap = {};
   monthlyReturns.forEach(r => { rMap[r.month] = r; });
