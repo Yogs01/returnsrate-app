@@ -115,6 +115,14 @@
   </div>
   <div class="content">
 
+    <!-- Overall Stat Cards -->
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Total Orders (Shipped)</div><div class="value brand" id="sOrders">—</div><div class="sub" id="sUnits">— units</div></div>
+      <div class="stat-card"><div class="label">Total Revenue</div><div class="value green" id="sRevenue">—</div><div class="sub">Shipped orders only</div></div>
+      <div class="stat-card"><div class="label">Total Returns</div><div class="value red" id="sReturns">—</div><div class="sub" id="sReturnUnits">— units returned</div></div>
+      <div class="stat-card"><div class="label">Overall Return Rate</div><div class="value" id="sReturnRate">—</div><div class="sub">Returns / Orders</div></div>
+    </div>
+
     <!-- Period Comparison Table -->
     <div class="card" style="margin-bottom:28px">
       <div class="card-header" style="justify-content:space-between;align-items:center">
@@ -274,6 +282,18 @@ async function load() {
   ]);
 
   buildPeriodTable(periods);
+
+  // Stat cards
+  const fmt = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtPct = v => v == null ? '—' : (v * 100).toFixed(1) + '%';
+  const { orderStats, returnStats } = d;
+  document.getElementById('sOrders').textContent = (orderStats.shipped || 0).toLocaleString();
+  document.getElementById('sUnits').textContent = (orderStats.units || 0).toLocaleString() + ' units';
+  document.getElementById('sRevenue').textContent = fmt(orderStats.revenue);
+  document.getElementById('sReturns').textContent = (returnStats.total || 0).toLocaleString();
+  document.getElementById('sReturnUnits').textContent = (returnStats.units || 0).toLocaleString() + ' units returned';
+  const rate = orderStats.shipped ? returnStats.total / orderStats.shipped : 0;
+  document.getElementById('sReturnRate').textContent = fmtPct(rate);
 
   // Monthly chart data
   const last18 = d.monthly.slice(-18);
