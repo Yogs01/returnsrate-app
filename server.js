@@ -221,6 +221,20 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   setImmediate(() => processFileAsync(req.file.path, dataType, uploadedBy, req.file.originalname, jobId));
 });
 
+// POST /api/import-orders — accepts pre-built JSON rows (used by seed-remote.js)
+app.post('/api/import-orders', (req, res) => {
+  const rows = req.body.rows;
+  if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows array required' });
+  let added = 0, skipped = 0;
+  db.transaction((rows) => {
+    for (const rec of rows) {
+      const r = insertOrder.run(rec);
+      if (r.changes > 0) added++; else skipped++;
+    }
+  })(rows);
+  res.json({ added, skipped });
+});
+
 // GET /api/job/:id — poll for job status
 app.get('/api/job/:id', (req, res) => {
   const job = jobs[req.params.id];
