@@ -291,12 +291,16 @@ async function loadStatCards() {
     const rate = orderStats.shipped ? returnStats.total / orderStats.shipped : 0;
     document.getElementById('sReturnRate').textContent = fmtPct(rate);
 
+    // Format YYYY-MM → "Jan '24" label
+    const ML = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const mLabel = s => { if (!s) return ''; const [y,mo] = s.split('-'); return ML[+mo-1] + " '" + y.slice(2); };
+
     // Charts (depend on monthly data from summary)
     const last18 = d.monthly.slice(-18);
     new Chart(document.getElementById('monthlyChart'), {
       type: 'bar',
       data: {
-        labels: last18.map(m => m.month?.replace(/-\d{4}/, '')),
+        labels: last18.map(m => mLabel(m.month)),
         datasets: [
           { label: 'Orders', data: last18.map(m => m.orders), backgroundColor: '#FF9900', borderRadius: 3, stack: 'a' },
           { label: 'Returns', data: last18.map(m => m.returns), backgroundColor: '#e53e3e', borderRadius: 3, stack: 'b' },
@@ -307,7 +311,7 @@ async function loadStatCards() {
     new Chart(document.getElementById('rateChart'), {
       type: 'line',
       data: {
-        labels: last18.map(m => m.month?.replace(/-\d{4}/, '')),
+        labels: last18.map(m => mLabel(m.month)),
         datasets: [{ label: 'Return Rate %', data: last18.map(m => m.orders > 0 ? +((m.returns / m.orders) * 100).toFixed(2) : 0), borderColor: '#e53e3e', backgroundColor: 'rgba(229,62,62,0.08)', tension: 0.3, fill: true, pointRadius: 3 }]
       },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45 } }, y: { ticks: { callback: v => v + '%' } } } }
