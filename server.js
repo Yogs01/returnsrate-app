@@ -244,8 +244,8 @@ app.get('/api/job/:id', (req, res) => {
 
 // GET /api/period-stats — Last Month / 3 Months / 12 Months breakdown
 app.get('/api/period-stats', (req, res) => {
-  const oMonths = db.prepare(`SELECT DISTINCT purchase_month FROM orders WHERE purchase_month != '' ORDER BY MIN(purchase_date) DESC`).all().map(r => r.purchase_month);
-  const rMonths = db.prepare(`SELECT DISTINCT return_month FROM returns WHERE return_month != '' ORDER BY MIN(return_date) DESC`).all().map(r => r.return_month);
+  const oMonths = db.prepare(`SELECT purchase_month FROM orders WHERE purchase_month != '' GROUP BY purchase_month ORDER BY MIN(purchase_date) DESC`).all().map(r => r.purchase_month);
+  const rMonths = db.prepare(`SELECT return_month FROM returns WHERE return_month != '' GROUP BY return_month ORDER BY MIN(return_date) DESC`).all().map(r => r.return_month);
 
   function calc(om, rm) {
     const oIn = om.length ? om.map(() => '?').join(',') : null;
@@ -292,12 +292,13 @@ app.get('/api/summary', (req, res) => {
     FROM orders WHERE purchase_month != ''
     GROUP BY purchase_month ORDER BY MIN(purchase_date) ASC
   `).all();
+  // Match by return_month (when return was received) so the chart shows actual monthly activity
   const monthlyReturns = db.prepare(`
-    SELECT purchase_month, COUNT(*) as return_count, SUM(quantity) as return_units
-    FROM returns WHERE purchase_month != '' GROUP BY purchase_month
+    SELECT return_month as month, COUNT(*) as return_count, SUM(quantity) as return_units
+    FROM returns WHERE return_month != '' GROUP BY return_month
   `).all();
   const rMap = {};
-  monthlyReturns.forEach(r => { rMap[r.purchase_month] = r; });
+  monthlyReturns.forEach(r => { rMap[r.month] = r; });
   const monthly = monthlyOrders.map(o => ({
     ...o,
     returns: rMap[o.month]?.return_count || 0,
