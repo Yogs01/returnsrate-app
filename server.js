@@ -282,25 +282,27 @@ app.get('/api/summary', (req, res) => {
   const orderStats = db.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN order_status='Shipped' THEN 1 ELSE 0 END) as shipped, SUM(CASE WHEN order_status='Cancelled' THEN 1 ELSE 0 END) as cancelled, SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue, SUM(CASE WHEN order_status='Shipped' THEN quantity ELSE 0 END) as units FROM orders`).get();
   const returnStats = db.prepare(`SELECT COUNT(*) as total, SUM(quantity) as units FROM returns`).get();
 
-  const monthly = db.prepare(`
-    SELECT
-      o.purchase_month as month,
-      MIN(o.purchase_date) as month_start,
-      COUNT(CASE WHEN o.order_status='Shipped' THEN 1 END) as orders,
-      SUM(CASE WHEN o.order_status='Shipped' THEN o.item_price ELSE 0 END) as revenue,
-      SUM(CASE WHEN o.order_status='Shipped' THEN o.quantity ELSE 0 END) as units,
-      COUNT(CASE WHEN o.order_status='Cancelled' THEN 1 END) as cancelled,
-      COALESCE(r.return_count, 0) as returns,
-      COALESCE(r.return_units, 0) as return_units
-    FROM orders o
-    LEFT JOIN (
-      SELECT purchase_month, COUNT(*) as return_count, SUM(quantity) as return_units
-      FROM returns GROUP BY purchase_month
-    ) r ON o.purchase_month = r.purchase_month
-    WHERE o.purchase_month != ''
-    GROUP BY o.purchase_month
-    ORDER BY MIN(o.purchase_date) ASC
+  // Two fast separate queries instead of a slow JOIN on 290k rows
+  const monthlyOrders = db.prepare(`
+    SELECT purchase_month as month, MIN(purchase_date) as month_start,
+      COUNT(CASE WHEN order_status='Shipped' THEN 1 END) as orders,
+      SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue,
+      SUM(CASE WHEN order_status='Shipped' THEN quantity ELSE 0 END) as units,
+      COUNT(CASE WHEN order_status='Cancelled' THEN 1 END) as cancelled
+    FROM orders WHERE purchase_month != ''
+    GROUP BY purchase_month ORDER BY MIN(purchase_date) ASC
   `).all();
+  const monthlyReturns = db.prepare(`
+    SELECT purchase_month, COUNT(*) as return_count, SUM(quantity) as return_units
+    FROM returns WHERE purchase_month != '' GROUP BY purchase_month
+  `).all();
+  const rMap = {};
+  monthlyReturns.forEach(r => { rMap[r.purchase_month] = r; });
+  const monthly = monthlyOrders.map(o => ({
+    ...o,
+    returns: rMap[o.month]?.return_count || 0,
+    return_units: rMap[o.month]?.return_units || 0
+  }));
 
   const weekly = db.prepare(`
     SELECT

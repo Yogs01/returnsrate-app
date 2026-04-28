@@ -275,63 +275,74 @@ function buildPeriodTable(data) {
   }).join('');
 }
 
-async function load() {
-  const [d, periods] = await Promise.all([
-    fetch('/api/summary').then(r => r.json()),
-    fetch('/api/period-stats').then(r => r.json()),
-  ]);
+const fmt = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtPct = v => v == null ? '—' : (v * 100).toFixed(1) + '%';
 
-  buildPeriodTable(periods);
+// Load stat cards fast (simple counts only)
+async function loadStatCards() {
+  try {
+    const d = await fetch('/api/summary').then(r => r.json());
+    const { orderStats, returnStats } = d;
+    document.getElementById('sOrders').textContent = (orderStats.shipped || 0).toLocaleString();
+    document.getElementById('sUnits').textContent = (orderStats.units || 0).toLocaleString() + ' units';
+    document.getElementById('sRevenue').textContent = fmt(orderStats.revenue);
+    document.getElementById('sReturns').textContent = (returnStats.total || 0).toLocaleString();
+    document.getElementById('sReturnUnits').textContent = (returnStats.units || 0).toLocaleString() + ' units returned';
+    const rate = orderStats.shipped ? returnStats.total / orderStats.shipped : 0;
+    document.getElementById('sReturnRate').textContent = fmtPct(rate);
 
-  // Stat cards
-  const fmt = v => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmtPct = v => v == null ? '—' : (v * 100).toFixed(1) + '%';
-  const { orderStats, returnStats } = d;
-  document.getElementById('sOrders').textContent = (orderStats.shipped || 0).toLocaleString();
-  document.getElementById('sUnits').textContent = (orderStats.units || 0).toLocaleString() + ' units';
-  document.getElementById('sRevenue').textContent = fmt(orderStats.revenue);
-  document.getElementById('sReturns').textContent = (returnStats.total || 0).toLocaleString();
-  document.getElementById('sReturnUnits').textContent = (returnStats.units || 0).toLocaleString() + ' units returned';
-  const rate = orderStats.shipped ? returnStats.total / orderStats.shipped : 0;
-  document.getElementById('sReturnRate').textContent = fmtPct(rate);
-
-  // Monthly chart data
-  const last18 = d.monthly.slice(-18);
-  new Chart(document.getElementById('monthlyChart'), {
-    type: 'bar',
-    data: {
-      labels: last18.map(m => m.month?.replace(/-\d{4}/, '')),
-      datasets: [
-        { label: 'Orders', data: last18.map(m => m.orders), backgroundColor: '#FF9900', borderRadius: 3, stack: 'a' },
-        { label: 'Returns', data: last18.map(m => m.returns), backgroundColor: '#e53e3e', borderRadius: 3, stack: 'b' },
-      ]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45 } } } }
-  });
-
-  new Chart(document.getElementById('rateChart'), {
-    type: 'line',
-    data: {
-      labels: last18.map(m => m.month?.replace(/-\d{4}/, '')),
-      datasets: [{ label: 'Return Rate %', data: last18.map(m => m.orders > 0 ? +((m.returns / m.orders) * 100).toFixed(2) : 0), borderColor: '#e53e3e', backgroundColor: 'rgba(229,62,62,0.08)', tension: 0.3, fill: true, pointRadius: 3 }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45 } }, y: { ticks: { callback: v => v + '%' } } } }
-  });
-
-  const top10 = d.byReason.slice(0, 10);
-  new Chart(document.getElementById('reasonChart'), {
-    type: 'bar',
-    data: { labels: top10.map(r => r.reason.replace(/_/g, ' ')), datasets: [{ data: top10.map(r => r.count), backgroundColor: '#3182ce', borderRadius: 3 }] },
-    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
-  });
-
-  const dispColors = { SELLABLE: '#38a169', CUSTOMER_DAMAGED: '#e53e3e', CARRIER_DAMAGED: '#dd6b20', DAMAGED: '#fc8181', DEFECTIVE: '#9f7aea' };
-  new Chart(document.getElementById('dispositionChart'), {
-    type: 'doughnut',
-    data: { labels: d.byDisposition.map(x => x.disposition), datasets: [{ data: d.byDisposition.map(x => x.count), backgroundColor: d.byDisposition.map(x => dispColors[x.disposition] || '#a0aec0') }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } }
-  });
+    // Charts (depend on monthly data from summary)
+    const last18 = d.monthly.slice(-18);
+    new Chart(document.getElementById('monthlyChart'), {
+      type: 'bar',
+      data: {
+        labels: last18.map(m => m.month?.replace(/-\d{4}/, '')),
+        datasets: [
+          { label: 'Orders', data: last18.map(m => m.orders), backgroundColor: '#FF9900', borderRadius: 3, stack: 'a' },
+          { label: 'Returns', data: last18.map(m => m.returns), backgroundColor: '#e53e3e', borderRadius: 3, stack: 'b' },
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45 } } } }
+    });
+    new Chart(document.getElementById('rateChart'), {
+      type: 'line',
+      data: {
+        labels: last18.map(m => m.month?.replace(/-\d{4}/, '')),
+        datasets: [{ label: 'Return Rate %', data: last18.map(m => m.orders > 0 ? +((m.returns / m.orders) * 100).toFixed(2) : 0), borderColor: '#e53e3e', backgroundColor: 'rgba(229,62,62,0.08)', tension: 0.3, fill: true, pointRadius: 3 }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 }, maxRotation: 45 } }, y: { ticks: { callback: v => v + '%' } } } }
+    });
+    const top10 = d.byReason.slice(0, 10);
+    new Chart(document.getElementById('reasonChart'), {
+      type: 'bar',
+      data: { labels: top10.map(r => r.reason.replace(/_/g, ' ')), datasets: [{ data: top10.map(r => r.count), backgroundColor: '#3182ce', borderRadius: 3 }] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } } }
+    });
+    const dispColors = { SELLABLE: '#38a169', CUSTOMER_DAMAGED: '#e53e3e', CARRIER_DAMAGED: '#dd6b20', DAMAGED: '#fc8181', DEFECTIVE: '#9f7aea' };
+    new Chart(document.getElementById('dispositionChart'), {
+      type: 'doughnut',
+      data: { labels: d.byDisposition.map(x => x.disposition), datasets: [{ data: d.byDisposition.map(x => x.count), backgroundColor: d.byDisposition.map(x => dispColors[x.disposition] || '#a0aec0') }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } }
+    });
+  } catch(e) {
+    console.error('Summary load error:', e);
+  }
 }
+
+// Load period table independently
+async function loadPeriodTable() {
+  try {
+    const periods = await fetch('/api/period-stats').then(r => r.json());
+    buildPeriodTable(periods);
+  } catch(e) {
+    document.getElementById('periodTbody').innerHTML = '<tr><td colspan="4" class="text-center" style="padding:24px;color:var(--red)">Failed to load period data. Try refreshing.</td></tr>';
+    console.error('Period stats error:', e);
+  }
+}
+
+// Kick off both independently — neither blocks the other
+loadStatCards();
+loadPeriodTable();
 
 load();
 </script>

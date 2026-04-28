@@ -61,9 +61,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_orders_week ON orders(purchase_week, purchase_date);
   CREATE INDEX IF NOT EXISTS idx_orders_brand ON orders(brand);
   CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);
+  CREATE INDEX IF NOT EXISTS idx_orders_status_month ON orders(order_status, purchase_month);
+  CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(purchase_date);
   CREATE INDEX IF NOT EXISTS idx_returns_month ON returns(return_month);
   CREATE INDEX IF NOT EXISTS idx_returns_reason ON returns(reason);
   CREATE INDEX IF NOT EXISTS idx_returns_brand ON returns(brand);
+  CREATE INDEX IF NOT EXISTS idx_returns_date ON returns(return_date);
+  CREATE INDEX IF NOT EXISTS idx_returns_disposition ON returns(disposition, return_month);
 `);
 
 module.exports = db;
