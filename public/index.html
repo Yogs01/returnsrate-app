@@ -117,7 +117,7 @@
 
     <!-- Overall Stat Cards -->
     <div class="stat-grid">
-      <div class="stat-card"><div class="label">Total Orders (Shipped)</div><div class="value brand" id="sOrders">—</div><div class="sub" id="sUnits">— units</div></div>
+      <div class="stat-card"><div class="label">Total Order Units</div><div class="value brand" id="sOrders">—</div><div class="sub" id="sUnits">excl. On Trial & Cancelled</div></div>
       <div class="stat-card"><div class="label">Total Revenue</div><div class="value green" id="sRevenue">—</div><div class="sub">Shipped orders only</div></div>
       <div class="stat-card"><div class="label">Total Returns</div><div class="value red" id="sReturns">—</div><div class="sub" id="sReturnUnits">— units returned</div></div>
       <div class="stat-card"><div class="label">Overall Return Rate</div><div class="value" id="sReturnRate">—</div><div class="sub">Returns / Orders</div></div>
@@ -283,12 +283,11 @@ async function loadStatCards() {
   try {
     const d = await fetch('/api/summary').then(r => r.json());
     const { orderStats, returnStats } = d;
-    document.getElementById('sOrders').textContent = (orderStats.shipped || 0).toLocaleString();
-    document.getElementById('sUnits').textContent = (orderStats.units || 0).toLocaleString() + ' units';
+    document.getElementById('sOrders').textContent = (orderStats.units || 0).toLocaleString();
     document.getElementById('sRevenue').textContent = fmt(orderStats.revenue);
-    document.getElementById('sReturns').textContent = (returnStats.total || 0).toLocaleString();
-    document.getElementById('sReturnUnits').textContent = (returnStats.units || 0).toLocaleString() + ' units returned';
-    const rate = orderStats.shipped ? returnStats.total / orderStats.shipped : 0;
+    document.getElementById('sReturns').textContent = (returnStats.units || 0).toLocaleString();
+    document.getElementById('sReturnUnits').textContent = (returnStats.total || 0).toLocaleString() + ' return records';
+    const rate = orderStats.units ? returnStats.units / orderStats.units : 0;
     document.getElementById('sReturnRate').textContent = fmtPct(rate);
 
     // Format YYYY-MM → "Jan '24" label
