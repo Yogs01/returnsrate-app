@@ -70,6 +70,59 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_returns_date ON returns(return_date);
   CREATE INDEX IF NOT EXISTS idx_returns_disposition ON returns(disposition);
   CREATE INDEX IF NOT EXISTS idx_returns_order_id ON returns(order_id);
+
+  CREATE TABLE IF NOT EXISTS inventory_aging (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_date TEXT,
+    sku TEXT,
+    fnsku TEXT,
+    asin TEXT,
+    product_name TEXT,
+    condition TEXT,
+    available INTEGER,
+    age_0_90 INTEGER,
+    age_91_180 INTEGER,
+    age_181_270 INTEGER,
+    age_271_365 INTEGER,
+    age_365_455 INTEGER,
+    age_455_plus INTEGER,
+    sold_t7 REAL,
+    sold_t30 REAL,
+    sold_t60 REAL,
+    sold_t90 REAL,
+    sell_through REAL,
+    recommended_action TEXT,
+    recommended_removal_qty INTEGER,
+    unfulfillable_qty INTEGER,
+    storage_type TEXT,
+    your_price REAL,
+    sales_rank INTEGER,
+    estimated_storage_cost REAL,
+    supplier TEXT,
+    brand TEXT,
+    row_hash TEXT UNIQUE
+  );
+
+  CREATE TABLE IF NOT EXISTS inventory_unfulfillable (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_date TEXT,
+    sku TEXT,
+    fnsku TEXT,
+    asin TEXT,
+    product_name TEXT,
+    condition TEXT,
+    unfulfillable_category TEXT,
+    quantity INTEGER,
+    brand TEXT,
+    supplier TEXT,
+    row_hash TEXT UNIQUE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_aging_snapshot ON inventory_aging(snapshot_date);
+  CREATE INDEX IF NOT EXISTS idx_aging_sku ON inventory_aging(sku);
+  CREATE INDEX IF NOT EXISTS idx_aging_brand ON inventory_aging(brand);
+  CREATE INDEX IF NOT EXISTS idx_aging_action ON inventory_aging(recommended_action);
+  CREATE INDEX IF NOT EXISTS idx_aging_storage ON inventory_aging(storage_type);
 `);
 
 module.exports = db;
