@@ -95,26 +95,31 @@ function buildOrderRecord(row) {
 function buildReturnRecord(row) {
   const rd = parseDate(row['Return Date2'] || row['Return Date'] || row['return-date']);
   const pd = parseDate(row['Purchase Date'] || '');
+  // Derive return_month and return_year from date if not explicitly in the file (Amazon CSV format)
+  const rdObj = rd ? new Date(rd + 'T00:00:00') : null;
+  const derivedMonth = rdObj ? rdObj.toLocaleString('en-US', { month: 'long', year: 'numeric' }) : '';
+  const derivedYear  = rdObj ? String(rdObj.getFullYear()) : '';
+  const reason = String(row['Reason'] || row['reason'] || '').trim();
   return {
-    purchase_month: String(row['Purchase Month'] || '').trim(),
-    purchase_date: pd,
-    return_date_parsed: String(row['Return Month'] || '').trim(),
-    return_year: String(row['Return Year'] || '').trim(),
-    return_date: rd,
-    return_week: getWeek(rd),
-    order_id: String(row['Order ID'] || row['order-id'] || '').trim(),
-    sku: String(row['SKU'] || row['sku'] || '').trim(),
-    asin: String(row['ASIN'] || row['asin'] || '').trim(),
-    fnsku: String(row['FNSKU'] || row['fnsku'] || '').trim(),
-    product_name: String(row['Product Name'] || row['product-name'] || '').trim(),
-    quantity: parseNum(row['Quantity'] || row['quantity']) || 1,
-    disposition: String(row['Detailed-disposition'] || '').trim(),
-    reason: String(row['Reason'] || '').trim(),
-    status: String(row['Status'] || '').trim(),
-    gender: String(row['Gender'] || '').trim(),
-    brand: String(row['Brand'] || '').trim(),
-    customer_comments: String(row['Customer-comments'] || '').trim(),
-    row_hash: hash(row['Order ID'] || '', row['ASIN'] || row['asin'] || '', rd || '', row['Reason'] || ''),
+    purchase_month:     String(row['Purchase Month'] || '').trim(),
+    purchase_date:      pd,
+    return_date_parsed: String(row['Return Month'] || '').trim() || derivedMonth,
+    return_year:        String(row['Return Year']  || '').trim() || derivedYear,
+    return_date:        rd,
+    return_week:        getWeek(rd),
+    order_id:           String(row['Order ID'] || row['order-id'] || '').trim(),
+    sku:                String(row['SKU']  || row['sku']  || '').trim(),
+    asin:               String(row['ASIN'] || row['asin'] || '').trim(),
+    fnsku:              String(row['FNSKU']|| row['fnsku']|| '').trim(),
+    product_name:       String(row['Product Name'] || row['product-name'] || '').trim(),
+    quantity:           parseNum(row['Quantity'] || row['quantity']) || 1,
+    disposition:        String(row['Detailed-disposition'] || row['detailed-disposition'] || '').trim(),
+    reason,
+    status:             String(row['Status'] || row['status'] || '').trim(),
+    gender:             String(row['Gender'] || row['gender'] || '').trim(),
+    brand:              String(row['Brand']  || row['brand']  || '').trim(),
+    customer_comments:  String(row['Customer-comments'] || row['customer-comments'] || '').trim(),
+    row_hash:           hash(row['Order ID'] || row['order-id'] || '', row['ASIN'] || row['asin'] || '', rd || '', reason),
   };
 }
 
@@ -176,8 +181,13 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
 
     if (!hasOrders && !hasReturns) {
       const rows = readSheet(wb.SheetNames[0]);
-      const firstKey = rows[0] ? Object.keys(rows[0])[0] : '';
-      const isReturn = firstKey.includes('Return') || firstKey.includes('Order ID');
+      // Detect by checking all column names (case-insensitive) for returns-specific fields
+      const colsLower = rows[0] ? Object.keys(rows[0]).map(k => k.toLowerCase()) : [];
+      const isReturn = colsLower.some(k =>
+        k === 'return-date' || k === 'return date' || k === 'return date2' ||
+        k === 'detailed-disposition' || k === 'return month'
+      );
+      console.log(`[${jobId}] auto-detect: isReturn=${isReturn} cols=${colsLower.slice(0,5).join(',')}`);
       db.transaction((rows) => {
         for (const row of rows) {
           if (isReturn) {
@@ -431,6 +441,18 @@ app.get('/api/uploads', (req, res) => {
 app.delete('/api/uploads/reset', (req, res) => {
   db.prepare('DELETE FROM upload_log').run();
   res.json({ success: true });
+});
+
+// DELETE /api/orders/cleanup-bad — removes orders rows that were accidentally
+// created from a returns CSV being mis-detected as orders (no order_id, no purchase_date, no order_status)
+app.delete('/api/orders/cleanup-bad', (req, res) => {
+  const before = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+  db.prepare(`DELETE FROM orders WHERE (amazon_order_id IS NULL OR amazon_order_id = '')
+              AND (purchase_date IS NULL OR purchase_date = '')
+              AND (order_status IS NULL OR order_status = '')`).run();
+  const after = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+  console.log(`cleanup-bad: removed ${before - after} bad order rows`);
+  res.json({ deleted: before - after, remaining: after });
 });
 
 // DELETE /api/returns/cleanup-empty-disposition — removes old returns rows that have no disposition
