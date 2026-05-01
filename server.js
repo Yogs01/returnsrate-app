@@ -119,7 +119,7 @@ function buildReturnRecord(row) {
     gender:             String(row['Gender'] || row['gender'] || '').trim(),
     brand:              String(row['Brand']  || row['brand']  || '').trim(),
     customer_comments:  String(row['Customer-comments'] || row['customer-comments'] || '').trim(),
-    row_hash:           hash(row['Order ID'] || row['order-id'] || '', row['ASIN'] || row['asin'] || '', rd || '', reason),
+    row_hash:           hash(String(row['Order ID'] || row['order-id'] || '').trim(), String(row['ASIN'] || row['asin'] || '').trim(), rd || '', reason),
   };
 }
 
@@ -452,6 +452,37 @@ app.delete('/api/orders/cleanup-bad', (req, res) => {
               AND (order_status IS NULL OR order_status = '')`).run();
   const after = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
   console.log(`cleanup-bad: removed ${before - after} bad order rows`);
+  res.json({ deleted: before - after, remaining: after });
+});
+
+// DELETE /api/returns/dedup — removes duplicate return rows caused by the same
+// return being uploaded multiple times with different column casing (Excel vs Amazon CSV).
+// Keeps the row with the best data (non-empty disposition) per unique order+asin+date+reason.
+app.delete('/api/returns/dedup', (req, res) => {
+  const before = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
+  // For each group of (order_id, asin, return_date, reason), keep only the row
+  // that has the most complete data (prefer non-empty disposition), then by lowest id.
+  db.prepare(`
+    DELETE FROM returns
+    WHERE id NOT IN (
+      SELECT id FROM (
+        SELECT id,
+          ROW_NUMBER() OVER (
+            PARTITION BY order_id, asin, return_date, reason
+            ORDER BY
+              CASE WHEN disposition != '' THEN 0 ELSE 1 END,
+              id ASC
+          ) as rn
+        FROM returns
+        WHERE order_id != '' AND return_date != ''
+      ) ranked
+      WHERE rn = 1
+    )
+    AND order_id != ''
+    AND return_date != ''
+  `).run();
+  const after = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
+  console.log(`dedup returns: removed ${before - after} duplicate rows, ${after} remain`);
   res.json({ deleted: before - after, remaining: after });
 });
 
