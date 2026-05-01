@@ -455,6 +455,61 @@ app.delete('/api/orders/cleanup-bad', (req, res) => {
   res.json({ deleted: before - after, remaining: after });
 });
 
+// GET /api/orders/dedup — same as DELETE but accessible via browser URL
+app.get('/api/orders/dedup', (req, res) => {
+  const before = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+  db.prepare(`
+    DELETE FROM orders
+    WHERE id NOT IN (
+      SELECT id FROM (
+        SELECT id,
+          ROW_NUMBER() OVER (
+            PARTITION BY amazon_order_id, sku
+            ORDER BY
+              CASE WHEN item_price IS NOT NULL AND item_price != 0 THEN 0 ELSE 1 END,
+              CASE WHEN purchase_date IS NOT NULL AND purchase_date != '' THEN 0 ELSE 1 END,
+              id ASC
+          ) as rn
+        FROM orders
+        WHERE amazon_order_id != '' AND sku != ''
+      ) ranked
+      WHERE rn = 1
+    )
+    AND amazon_order_id != ''
+    AND sku != ''
+  `).run();
+  const after = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+  console.log(`dedup orders: removed ${before - after} duplicate rows, ${after} remain`);
+  res.send(`<h2>Orders Dedup Done</h2><p>Removed: <b>${before - after}</b> duplicates</p><p>Remaining: <b>${after}</b> orders</p><br><a href="/api/returns/dedup">Run Returns Dedup next →</a>`);
+});
+
+// GET /api/returns/dedup — same as DELETE but accessible via browser URL
+app.get('/api/returns/dedup', (req, res) => {
+  const before = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
+  db.prepare(`
+    DELETE FROM returns
+    WHERE id NOT IN (
+      SELECT id FROM (
+        SELECT id,
+          ROW_NUMBER() OVER (
+            PARTITION BY order_id, asin, return_date, reason
+            ORDER BY
+              CASE WHEN disposition != '' THEN 0 ELSE 1 END,
+              id ASC
+          ) as rn
+        FROM returns
+        WHERE order_id != '' AND return_date != ''
+      ) ranked
+      WHERE rn = 1
+    )
+    AND order_id != ''
+    AND return_date != ''
+  `).run();
+  const after = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
+  console.log(`dedup returns: removed ${before - after} duplicate rows, ${after} remain`);
+  res.send(`<h2>Returns Dedup Done</h2><p>Removed: <b>${before - after}</b> duplicates</p><p>Remaining: <b>${after}</b> returns</p><br><a href="/">← Back to Dashboard</a>`);
+});
+
 // DELETE /api/orders/dedup — removes duplicate order rows keeping best data per amazon_order_id + sku
 app.delete('/api/orders/dedup', (req, res) => {
   const before = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
