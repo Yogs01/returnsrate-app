@@ -455,6 +455,18 @@ app.delete('/api/orders/cleanup-bad', (req, res) => {
   res.json({ deleted: before - after, remaining: after });
 });
 
+// GET /api/returns/diagnostic — shows breakdown to identify duplicate sources
+app.get('/api/returns/diagnostic', (req, res) => {
+  const total        = db.prepare(`SELECT COUNT(*) as n FROM returns`).get().n;
+  const withOrderId  = db.prepare(`SELECT COUNT(*) as n FROM returns WHERE order_id != '' AND order_id IS NOT NULL`).get().n;
+  const noOrderId    = db.prepare(`SELECT COUNT(*) as n FROM returns WHERE order_id = '' OR order_id IS NULL`).get().n;
+  const dateRange    = db.prepare(`SELECT MIN(return_date) as earliest, MAX(return_date) as latest FROM returns WHERE return_date != ''`).get();
+  const byYear       = db.prepare(`SELECT strftime('%Y', return_date) as yr, COUNT(*) as cnt FROM returns WHERE return_date != '' GROUP BY yr ORDER BY yr`).all();
+  const sampleNoId   = db.prepare(`SELECT order_id, asin, return_date, reason, disposition FROM returns WHERE order_id = '' OR order_id IS NULL LIMIT 3`).all();
+  const sampleWithId = db.prepare(`SELECT order_id, asin, return_date, reason, disposition FROM returns WHERE order_id != '' LIMIT 3`).all();
+  res.json({ total, withOrderId, noOrderId, dateRange, byYear, sampleNoId, sampleWithId });
+});
+
 // GET /api/orders/dedup — same as DELETE but accessible via browser URL
 app.get('/api/orders/dedup', (req, res) => {
   const before = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
