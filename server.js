@@ -455,6 +455,34 @@ app.delete('/api/orders/cleanup-bad', (req, res) => {
   res.json({ deleted: before - after, remaining: after });
 });
 
+// DELETE /api/orders/dedup — removes duplicate order rows keeping best data per amazon_order_id + sku
+app.delete('/api/orders/dedup', (req, res) => {
+  const before = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+  db.prepare(`
+    DELETE FROM orders
+    WHERE id NOT IN (
+      SELECT id FROM (
+        SELECT id,
+          ROW_NUMBER() OVER (
+            PARTITION BY amazon_order_id, sku
+            ORDER BY
+              CASE WHEN item_price IS NOT NULL AND item_price != 0 THEN 0 ELSE 1 END,
+              CASE WHEN purchase_date IS NOT NULL AND purchase_date != '' THEN 0 ELSE 1 END,
+              id ASC
+          ) as rn
+        FROM orders
+        WHERE amazon_order_id != '' AND sku != ''
+      ) ranked
+      WHERE rn = 1
+    )
+    AND amazon_order_id != ''
+    AND sku != ''
+  `).run();
+  const after = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+  console.log(`dedup orders: removed ${before - after} duplicate rows, ${after} remain`);
+  res.json({ deleted: before - after, remaining: after });
+});
+
 // DELETE /api/returns/dedup — removes duplicate return rows caused by the same
 // return being uploaded multiple times with different column casing (Excel vs Amazon CSV).
 // Keeps the row with the best data (non-empty disposition) per unique order+asin+date+reason.
