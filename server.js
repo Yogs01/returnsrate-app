@@ -462,6 +462,16 @@ app.delete('/api/orders/cleanup-bad', (req, res) => {
   res.json({ deleted: before - after, remaining: after });
 });
 
+// GET /api/reset-all — wipes ALL data (orders + returns + upload log) for a full clean re-import
+app.get('/api/reset-all', (req, res) => {
+  const orders  = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+  const returns = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
+  db.prepare('DELETE FROM orders').run();
+  db.prepare('DELETE FROM returns').run();
+  db.prepare('DELETE FROM upload_log').run();
+  res.send(`<h2>Full Reset Done</h2><p>Deleted: <b>${orders.toLocaleString()}</b> orders and <b>${returns.toLocaleString()}</b> returns</p><p>Database is now empty. Re-upload your Excel file to restore data.</p><br><a href="/">← Back to Dashboard</a>`);
+});
+
 // GET /api/returns/reset — wipes all returns so you can re-import from a single clean source
 app.get('/api/returns/reset', (req, res) => {
   const before = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
