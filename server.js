@@ -455,6 +455,13 @@ app.delete('/api/orders/cleanup-bad', (req, res) => {
   res.json({ deleted: before - after, remaining: after });
 });
 
+// GET /api/returns/reset — wipes all returns so you can re-import from a single clean source
+app.get('/api/returns/reset', (req, res) => {
+  const before = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
+  db.prepare('DELETE FROM returns').run();
+  res.send(`<h2>Returns Reset Done</h2><p>Deleted: <b>${before}</b> return records</p><p>Returns table is now empty.</p><br><p>Now re-upload your Excel file to restore clean data.</p><br><a href="/">← Back to Dashboard</a>`);
+});
+
 // GET /api/returns/diagnostic — shows breakdown to identify duplicate sources
 app.get('/api/returns/diagnostic', (req, res) => {
   const total        = db.prepare(`SELECT COUNT(*) as n FROM returns`).get().n;
