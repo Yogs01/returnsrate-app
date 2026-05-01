@@ -279,11 +279,18 @@ app.get('/api/job/:id', (req, res) => {
 // GET /api/period-stats — Last Month / 3 Months / 12 Months breakdown
 // Returns are attributed to the PURCHASE MONTH of the original order (matched via Order ID)
 app.get('/api/period-stats', (req, res) => {
+  // Always use the last COMPLETE calendar month as the reference point.
+  // This prevents a partial current month (e.g. May 1st data) from
+  // becoming "Last Month" and showing misleadingly low numbers.
+  const now = new Date();
+  const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
   const oMonths = db.prepare(`
     SELECT strftime('%Y-%m', purchase_date) as month FROM orders
     WHERE purchase_date != '' AND purchase_date IS NOT NULL
+      AND strftime('%Y-%m', purchase_date) < ?
     GROUP BY month ORDER BY month DESC
-  `).all().map(r => r.month).filter(Boolean);
+  `).all(currentYM).map(r => r.month).filter(Boolean);
 
   function calc(om) {
     if (!om.length) return { orders_units: 0, returns_total: 0, sellable: 0, unsellable: 0, dispositions: [] };
