@@ -283,7 +283,6 @@ async function loadStatCards() {
     const d = await fetch('/api/summary').then(r => r.json());
     const { orderStats, returnStats } = d;
     document.getElementById('sOrders').textContent = (orderStats.units || 0).toLocaleString();
-    document.getElementById('sRevenue').textContent = fmt(orderStats.revenue);
     document.getElementById('sReturns').textContent = (returnStats.units || 0).toLocaleString();
     document.getElementById('sReturnUnits').textContent = (returnStats.total || 0).toLocaleString() + ' return records';
     const rate = orderStats.units ? returnStats.units / orderStats.units : 0;
