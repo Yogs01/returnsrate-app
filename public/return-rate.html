@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Return Rate Analysis</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>"/>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .view-toggle { display:flex; gap:4px; }
+    .toggle-btn {
+      padding: 7px 16px; border: 1.5px solid var(--border); border-radius: 7px;
+      background: #fff; color: var(--text-muted); font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+    }
+    .toggle-btn:hover { border-color: var(--brand); color: var(--brand-dark); }
+    .toggle-btn.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+    .rate-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 20px;
+      font-size: 12px; font-weight: 700; min-width: 54px; text-align: center;
+    }
+    .rate-great  { background:#d4edda; color:#155724; }
+    .rate-ok     { background:#fff3cd; color:#856404; }
+    .rate-warn   { background:#fde8d8; color:#823300; }
+    .rate-bad    { background:#f8d7da; color:#721c24; }
+
+    .rank-num {
+      display: inline-flex; align-items:center; justify-content:center;
+      width: 24px; height: 24px; border-radius: 50%; font-size: 11px;
+      font-weight: 700; background: var(--bg); color: var(--text-muted);
+    }
+    .rank-1 { background:#ffd700; color:#7a5c00; }
+    .rank-2 { background:#e0e0e0; color:#555; }
+    .rank-3 { background:#f4a460; color:#5a2d00; }
+
+    .sort-th { cursor: pointer; user-select:none; }
+    .sort-th:hover { color: var(--brand-dark); }
+    .sort-arrow { margin-left:4px; opacity:.5; font-size:11px; }
+    .sort-th.asc .sort-arrow::after  { content:'▲'; opacity:1; }
+    .sort-th.desc .sort-arrow::after { content:'▼'; opacity:1; }
+    .sort-th .sort-arrow::after { content:'⇅'; }
+
+    .stat-grid-3 {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 18px; margin-bottom: 24px;
+    }
+    @media(max-width:680px){ .stat-grid-3{ grid-template-columns:1fr; } }
+
+    .mini-bar-wrap { display:flex; align-items:center; gap:8px; min-width:100px; }
+    .mini-bar-track { flex:1; height:6px; background:var(--border); border-radius:3px; }
+    .mini-bar-fill  { height:100%; border-radius:3px; }
+  </style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-title">Orders & Returns</div>
+    <div class="logo-sub">Heart&amp;Sole Team</div>
+  </div>
+  <nav>
+    <a href="index.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+      Dashboard
+    </a>
+    <a href="monthly.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+      Monthly View
+    </a>
+    <a href="weekly.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      Weekly View
+    </a>
+    <a href="returns.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+      Returns Analysis
+    </a>
+    <a href="return-rate.html" class="nav-item active">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/></svg>
+      Return Rate
+    </a>
+    <a href="upload.html" class="nav-item">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+      Upload Data
+    </a>
+  </nav>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <h1>Return Rate Analysis</h1>
+    <div style="font-size:13px;color:var(--text-muted)" id="topbarMeta"></div>
+  </div>
+  <div class="content">
+
+    <!-- Stat cards -->
+    <div class="stat-grid-3" id="statCards">
+      <div class="stat-card"><div class="label">Total Items</div><div class="value" id="sTotalItems">—</div><div class="sub" id="sTotalSub">—</div></div>
+      <div class="stat-card"><div class="label">Avg Return Rate</div><div class="value" id="sAvgRate">—</div><div class="sub">across all items</div></div>
+      <div class="stat-card"><div class="label">Worst Offender</div><div class="value red" id="sWorstRate">—</div><div class="sub" id="sWorstName" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div></div>
+    </div>
+
+    <!-- Main table card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="view-toggle">
+          <button class="toggle-btn active" data-view="sku"   onclick="setView('sku',this)">By SKU</button>
+          <button class="toggle-btn"        data-view="style" onclick="setView('style',this)">By Style</button>
+          <button class="toggle-btn"        data-view="brand" onclick="setView('brand',this)">By Brand</button>
+        </div>
+        <button class="btn btn-outline" onclick="exportCSV()" style="font-size:12px;padding:6px 12px">↓ Export CSV</button>
+      </div>
+
+      <!-- Filters -->
+      <div class="card-body" style="padding-bottom:0">
+        <div class="filters">
+          <select id="monthFilter" onchange="load(1)">
+            <option value="">All Months</option>
+          </select>
+          <select id="weekFilter" onchange="load(1)">
+            <option value="">All Weeks</option>
+          </select>
+          <select id="brandFilter" onchange="load(1)">
+            <option value="">All Brands</option>
+          </select>
+          <input type="text" id="styleSearch" placeholder="Search style / product…" oninput="debounce()" />
+          <button class="btn btn-outline" onclick="clearFilters()" style="font-size:12px;padding:7px 12px">Clear</button>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr id="tableHead">
+              <th style="width:40px">#</th>
+              <th id="thName">Name</th>
+              <th id="thBrand" class="sort-th desc" onclick="toggleSort('brand')">Brand<span class="sort-arrow"></span></th>
+              <th class="sort-th text-right" id="thOrders" onclick="toggleSort('orders')">Orders<span class="sort-arrow"></span></th>
+              <th class="sort-th text-right" id="thReturns" onclick="toggleSort('returns')">Returns<span class="sort-arrow"></span></th>
+              <th class="sort-th text-right" id="thRate" onclick="toggleSort('rate')">Return Rate<span class="sort-arrow"></span></th>
+              <th style="min-width:120px">Rate Visual</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <tr><td colspan="7" class="text-center" style="padding:40px"><span class="spinner"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-body" style="padding-top:16px">
+        <div class="pagination" id="pagination"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let currentView = 'sku';
+let currentSort = 'rate';
+let currentPage = 1;
+let debTimer;
+let allFilters = {};
+let lastData = { records: [], total: 0 };
+
+const n   = v => (v == null ? '—' : Number(v).toLocaleString());
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmtPct = v => v == null ? '—' : parseFloat(v).toFixed(1) + '%';
+
+function rateBadge(rate) {
+  if (rate == null) return `<span class="rate-badge rate-ok">—</span>`;
+  const r = parseFloat(rate);
+  const cls = r >= 25 ? 'rate-bad' : r >= 15 ? 'rate-warn' : r >= 5 ? 'rate-ok' : 'rate-great';
+  return `<span class="rate-badge ${cls}">${r.toFixed(1)}%</span>`;
+}
+
+function rankNum(i) {
+  const cls = i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : '';
+  return `<span class="rank-num ${cls}">${i + 1}</span>`;
+}
+
+async function loadFilters() {
+  try {
+    const f = await fetch('/api/filters').then(r => r.json());
+    allFilters = f;
+
+    const mSel = document.getElementById('monthFilter');
+    f.orderMonths.forEach(m => {
+      const o = document.createElement('option'); o.value = m; o.textContent = m; mSel.appendChild(o);
+    });
+
+    const wSel = document.getElementById('weekFilter');
+    f.weeks.forEach(w => {
+      const label = `${w.year} Week ${w.week}${w.start_date ? ' · ' + fmtDate(w.start_date) : ''}`;
+      const o = document.createElement('option');
+      o.value = JSON.stringify({ week: w.week, year: w.year });
+      o.textContent = label;
+      wSel.appendChild(o);
+    });
+
+    const bSel = document.getElementById('brandFilter');
+    f.brands.forEach(b => {
+      const o = document.createElement('option'); o.value = b; o.textContent = b; bSel.appendChild(o);
+    });
+  } catch(e) { console.error(e); }
+}
+
+function setView(view, btn) {
+  currentView = view;
+  currentPage = 1;
+  document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // Update Brand column visibility (hide for By Brand view)
+  document.getElementById('thBrand').style.display = view === 'brand' ? 'none' : '';
+
+  load(1);
+}
+
+function toggleSort(col) {
+  if (currentSort === col) {
+    // Already sorted, flip direction (but we only support desc for now — re-trigger)
+  }
+  currentSort = col;
+  // Update header highlights
+  ['brand','orders','returns','rate'].forEach(c => {
+    const th = document.getElementById(`th${c.charAt(0).toUpperCase()+c.slice(1)}`);
+    if (th) { th.classList.remove('asc','desc'); }
+  });
+  const th = document.getElementById(`th${col.charAt(0).toUpperCase()+col.slice(1)}`);
+  if (th) th.classList.add('desc');
+  load(1);
+}
+
+function debounce() { clearTimeout(debTimer); debTimer = setTimeout(() => load(1), 350); }
+
+function clearFilters() {
+  document.getElementById('monthFilter').value = '';
+  document.getElementById('weekFilter').value  = '';
+  document.getElementById('brandFilter').value = '';
+  document.getElementById('styleSearch').value = '';
+  load(1);
+}
+
+async function load(page) {
+  currentPage = page || currentPage;
+
+  const month   = document.getElementById('monthFilter').value;
+  const weekRaw = document.getElementById('weekFilter').value;
+  const brand   = document.getElementById('brandFilter').value;
+  const style   = document.getElementById('styleSearch').value;
+
+  let week = '', year = '';
+  if (weekRaw) {
+    try { const w = JSON.parse(weekRaw); week = w.week; year = w.year; } catch(_) {}
+  }
+
+  const qs = new URLSearchParams({
+    groupBy: currentView, sort: currentSort, page: currentPage,
+    month, week, year, brand, style
+  });
+
+  document.getElementById('tableBody').innerHTML =
+    `<tr><td colspan="7" class="text-center" style="padding:40px"><span class="spinner"></span></td></tr>`;
+
+  try {
+    const d = await fetch(`/api/return-rate?${qs}`).then(r => r.json());
+    if (d.error) { showError(d.error); return; }
+    lastData = d;
+    renderTable(d);
+    renderStats(d);
+    renderPagination(d);
+    updateTopbar(d);
+  } catch(e) {
+    showError(e.message);
+  }
+}
+
+function renderStats(d) {
+  const label = currentView === 'sku' ? 'SKUs' : currentView === 'style' ? 'Styles' : 'Brands';
+  document.getElementById('sTotalItems').textContent = n(d.total);
+  document.getElementById('sTotalSub').textContent   = `${label} tracked`;
+  document.getElementById('sAvgRate').textContent    = d.avgRate != null ? fmtPct(d.avgRate) : '—';
+  document.getElementById('sWorstRate').textContent  = d.topRow  ? fmtPct(d.topRow.return_rate) : '—';
+  document.getElementById('sWorstName').textContent  = d.topRow  ? (d.topRow.name || '—') : '—';
+  document.getElementById('sWorstName').title        = d.topRow  ? (d.topRow.sample_name || d.topRow.name || '') : '';
+}
+
+function updateTopbar(d) {
+  const filters = [];
+  const m = document.getElementById('monthFilter').value;
+  const w = document.getElementById('weekFilter').selectedOptions[0]?.text;
+  const b = document.getElementById('brandFilter').value;
+  const s = document.getElementById('styleSearch').value;
+  if (m) filters.push(m);
+  if (w && w !== 'All Weeks') filters.push(w);
+  if (b) filters.push(b);
+  if (s) filters.push(`"${s}"`);
+  document.getElementById('topbarMeta').textContent =
+    filters.length ? `Filtered: ${filters.join(' · ')}` : `${n(d.total)} items · all time`;
+}
+
+function renderTable(d) {
+  const isByBrand = currentView === 'brand';
+  const isBySKU   = currentView === 'sku';
+
+  // Update column header
+  document.getElementById('thName').textContent =
+    isBySKU ? 'SKU / Product' : isByBrand ? 'Brand' : 'Style / Product';
+
+  if (!d.records?.length) {
+    document.getElementById('tableBody').innerHTML =
+      `<tr><td colspan="7" class="empty-state"><p>No data found. Try adjusting your filters.</p></td></tr>`;
+    return;
+  }
+
+  const offset = (currentPage - 1) * 50;
+
+  document.getElementById('tableBody').innerHTML = d.records.map((r, i) => {
+    const rank = offset + i;
+    const rate = r.return_rate != null ? parseFloat(r.return_rate) : null;
+    const barWidth = Math.min(rate || 0, 100);
+    const barColor = rate >= 25 ? '#e53e3e' : rate >= 15 ? '#dd6b20' : rate >= 5 ? '#d69e2e' : '#38a169';
+
+    const nameCell = isBySKU
+      ? `<td>
+           <div style="font-weight:600;font-size:13px">${esc(r.name)}</div>
+           <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(r.sample_name||'')}</div>
+         </td>`
+      : isByBrand
+      ? `<td><strong>${esc(r.name)}</strong></td>`
+      : `<td style="max-width:300px;font-weight:500">${esc(r.name)}</td>`;
+
+    const brandCell = isByBrand ? '' : `<td style="color:var(--text-muted)">${esc(r.sample_brand||'—')}</td>`;
+
+    return `<tr>
+      <td>${rankNum(rank)}</td>
+      ${nameCell}
+      ${brandCell}
+      <td class="text-right">${n(r.orders_qty)}</td>
+      <td class="text-right">${n(r.returns_qty)}</td>
+      <td class="text-right">${rateBadge(r.return_rate)}</td>
+      <td>
+        <div class="mini-bar-wrap">
+          <div class="mini-bar-track">
+            <div class="mini-bar-fill" style="width:${barWidth}%;background:${barColor}"></div>
+          </div>
+          <span style="font-size:11px;color:var(--text-muted);width:38px">${rate != null ? rate.toFixed(1)+'%' : '—'}</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPagination(d) {
+  const pg = document.getElementById('pagination');
+  if (d.pages <= 1) { pg.innerHTML = ''; return; }
+  let html = `<button ${d.page<=1?'disabled':''} onclick="load(${d.page-1})">← Prev</button>`;
+  const start = Math.max(1, d.page - 2);
+  const end   = Math.min(d.pages, d.page + 2);
+  for (let i = start; i <= end; i++) {
+    html += `<button class="${i===d.page?'active':''}" onclick="load(${i})">${i}</button>`;
+  }
+  html += `<button ${d.page>=d.pages?'disabled':''} onclick="load(${d.page+1})">Next →</button>`;
+  html += `<span class="page-info">Page ${d.page} of ${d.pages} · ${n(d.total)} items</span>`;
+  pg.innerHTML = html;
+}
+
+function showError(msg) {
+  document.getElementById('tableBody').innerHTML =
+    `<tr><td colspan="7"><div class="alert alert-error" style="margin:16px">${esc(msg)}</div></td></tr>`;
+}
+
+function fmtDate(s) {
+  if (!s) return '';
+  try { return new Date(s+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+  catch(_) { return s; }
+}
+
+function exportCSV() {
+  const rows = lastData.records || [];
+  if (!rows.length) { alert('No data to export.'); return; }
+  const isByBrand = currentView === 'brand';
+  const isBySKU   = currentView === 'sku';
+  const header = isBySKU
+    ? ['SKU','Product Name','Brand','Orders','Returns','Return Rate %']
+    : isByBrand
+    ? ['Brand','Orders','Returns','Return Rate %']
+    : ['Style / Product','Brand','Orders','Returns','Return Rate %'];
+
+  const csvRows = [header.join(',')];
+  rows.forEach(r => {
+    const rate = r.return_rate != null ? parseFloat(r.return_rate).toFixed(1) : '';
+    const row  = isBySKU
+      ? [r.name, r.sample_name, r.sample_brand, r.orders_qty, r.returns_qty, rate]
+      : isByBrand
+      ? [r.name, r.orders_qty, r.returns_qty, rate]
+      : [r.name, r.sample_brand, r.orders_qty, r.returns_qty, rate];
+    csvRows.push(row.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
+  });
+
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `return-rate-by-${currentView}.csv`;
+  a.click();
+}
+
+// Init
+loadFilters().then(() => load(1));
+</script>
+</body>
+</html>

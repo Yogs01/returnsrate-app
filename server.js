@@ -435,7 +435,91 @@ app.get('/api/filters', (req, res) => {
   const months = db.prepare(`SELECT DISTINCT return_month FROM returns WHERE return_month != '' ORDER BY MIN(return_date) DESC`).all().map(r => r.return_month);
   const dispositions = db.prepare(`SELECT DISTINCT disposition FROM returns WHERE disposition != '' ORDER BY disposition`).all().map(r => r.disposition);
   const orderMonths = db.prepare(`SELECT DISTINCT purchase_month FROM orders WHERE purchase_month != '' ORDER BY MIN(purchase_date) DESC`).all().map(r => r.purchase_month);
-  res.json({ reasons, brands, months, dispositions, orderMonths });
+  const weeks = db.prepare(`
+    SELECT CAST(strftime('%Y', purchase_date) AS TEXT) as year,
+      purchase_week as week, MIN(purchase_date) as start_date
+    FROM orders WHERE purchase_date != '' AND purchase_week IS NOT NULL
+    GROUP BY year, week ORDER BY year DESC, week DESC LIMIT 156
+  `).all();
+  res.json({ reasons, brands, months, dispositions, orderMonths, weeks });
+});
+
+// GET /api/return-rate?groupBy=sku|style|brand&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders
+app.get('/api/return-rate', (req, res) => {
+  const groupBy = ['sku', 'style', 'brand'].includes(req.query.groupBy) ? req.query.groupBy : 'sku';
+  const month   = req.query.month  || '';
+  const week    = req.query.week   ? parseInt(req.query.week)  : null;
+  const year    = req.query.year   ? String(req.query.year)    : '';
+  const brand   = req.query.brand  || '';
+  const style   = req.query.style  || '';
+  const sort    = ['rate', 'returns', 'orders'].includes(req.query.sort) ? req.query.sort : 'rate';
+  const page    = Math.max(1, parseInt(req.query.page) || 1);
+  const limit   = 50;
+  const offset  = (page - 1) * limit;
+
+  const groupCol = groupBy === 'brand' ? 'brand'
+                 : groupBy === 'style' ? 'product_name'
+                 : 'sku';
+
+  const oWhere = [`o.${groupCol} != ''`, `o.order_status != 'On Trial'`];
+  const oParams = [];
+  if (month) { oWhere.push('o.purchase_month = ?'); oParams.push(month); }
+  if (week)  { oWhere.push('o.purchase_week = ?');  oParams.push(week); }
+  if (year)  { oWhere.push("strftime('%Y', o.purchase_date) = ?"); oParams.push(year); }
+  if (brand && groupBy !== 'brand') { oWhere.push('o.brand = ?');          oParams.push(brand); }
+  if (style && groupBy !== 'style') { oWhere.push('o.product_name LIKE ?'); oParams.push(`%${style}%`); }
+
+  const rWhere = [`r.${groupCol} != ''`];
+  const rParams = [];
+  if (month) { rWhere.push('r.return_month = ?'); rParams.push(month); }
+  if (week)  { rWhere.push('r.return_week = ?');  rParams.push(week); }
+  if (year)  { rWhere.push("strftime('%Y', r.return_date) = ?"); rParams.push(year); }
+  if (brand && groupBy !== 'brand') { rWhere.push('r.brand = ?');          rParams.push(brand); }
+  if (style && groupBy !== 'style') { rWhere.push('r.product_name LIKE ?'); rParams.push(`%${style}%`); }
+
+  const orderSQL = sort === 'returns' ? 'returns_qty DESC, return_rate DESC'
+                 : sort === 'orders'  ? 'orders_qty DESC'
+                 : 'return_rate DESC, returns_qty DESC';
+
+  const coreSql = `
+    SELECT
+      o_agg.grp                                                                          AS name,
+      MAX(o_agg.sample_name)                                                             AS sample_name,
+      MAX(o_agg.sample_brand)                                                            AS sample_brand,
+      o_agg.orders_qty,
+      COALESCE(r_agg.returns_qty, 0)                                                     AS returns_qty,
+      ROUND(COALESCE(r_agg.returns_qty, 0) * 100.0 / NULLIF(o_agg.orders_qty, 0), 1)   AS return_rate
+    FROM (
+      SELECT o.${groupCol} AS grp, MAX(o.product_name) AS sample_name, MAX(o.brand) AS sample_brand,
+        SUM(o.quantity) AS orders_qty
+      FROM orders o WHERE ${oWhere.join(' AND ')}
+      GROUP BY o.${groupCol}
+    ) o_agg
+    LEFT JOIN (
+      SELECT r.${groupCol} AS grp, SUM(r.quantity) AS returns_qty
+      FROM returns r WHERE ${rWhere.join(' AND ')}
+      GROUP BY r.${groupCol}
+    ) r_agg ON r_agg.grp = o_agg.grp
+    WHERE o_agg.orders_qty > 0
+  `;
+
+  const allParams = [...oParams, ...rParams];
+
+  try {
+    const stats   = db.prepare(`SELECT COUNT(*) as total, AVG(COALESCE(r_agg.returns_qty,0)*100.0/NULLIF(o_agg.orders_qty,0)) as avg_rate, MAX(COALESCE(r_agg.returns_qty,0)*100.0/NULLIF(o_agg.orders_qty,0)) as max_rate FROM (${coreSql})`).get(...allParams);
+    const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...allParams, limit, offset);
+    const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...allParams);
+    res.json({
+      records, total: stats.total, page, pages: Math.ceil(stats.total / limit),
+      groupBy,
+      avgRate:  stats.avg_rate  != null ? parseFloat(stats.avg_rate).toFixed(1)  : null,
+      maxRate:  stats.max_rate  != null ? parseFloat(stats.max_rate).toFixed(1)  : null,
+      topRow
+    });
+  } catch(e) {
+    console.error('return-rate error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/uploads
