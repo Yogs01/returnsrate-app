@@ -506,7 +506,7 @@ app.get('/api/return-rate', (req, res) => {
   const allParams = [...oParams, ...rParams];
 
   try {
-    const stats   = db.prepare(`SELECT COUNT(*) as total, AVG(COALESCE(r_agg.returns_qty,0)*100.0/NULLIF(o_agg.orders_qty,0)) as avg_rate, MAX(COALESCE(r_agg.returns_qty,0)*100.0/NULLIF(o_agg.orders_qty,0)) as max_rate FROM (${coreSql})`).get(...allParams);
+    const stats   = db.prepare(`SELECT COUNT(*) as total, AVG(return_rate) as avg_rate, MAX(return_rate) as max_rate FROM (${coreSql})`).get(...allParams);
     const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...allParams, limit, offset);
     const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...allParams);
     res.json({
