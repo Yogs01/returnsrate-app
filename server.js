@@ -483,10 +483,14 @@ app.get('/api/returns', (req, res) => {
 // GET /api/filters
 app.get('/api/filters', (req, res) => {
   const reasons = db.prepare(`SELECT DISTINCT reason FROM returns WHERE reason != '' ORDER BY reason`).all().map(r => r.reason);
-  const brands = db.prepare(`SELECT DISTINCT brand FROM returns WHERE brand != '' AND brand != '-' ORDER BY brand`).all().map(r => r.brand);
+  const brands = db.prepare(`SELECT DISTINCT brand FROM orders WHERE brand != '' AND brand != '-' AND brand != '0' ORDER BY brand`).all().map(r => r.brand);
   const months = db.prepare(`SELECT DISTINCT return_month FROM returns WHERE return_month != '' ORDER BY MIN(return_date) DESC`).all().map(r => r.return_month);
   const dispositions = db.prepare(`SELECT DISTINCT disposition FROM returns WHERE disposition != '' ORDER BY disposition`).all().map(r => r.disposition);
-  const orderMonths = db.prepare(`SELECT DISTINCT purchase_month FROM orders WHERE purchase_month != '' ORDER BY MIN(purchase_date) DESC`).all().map(r => r.purchase_month);
+  const orderMonths = db.prepare(`
+    SELECT DISTINCT strftime('%Y-%m', purchase_date) as month
+    FROM orders WHERE purchase_date != '' AND purchase_date IS NOT NULL
+    ORDER BY month DESC
+  `).all().map(r => r.month).filter(Boolean);
   const weeks = db.prepare(`
     SELECT CAST(strftime('%Y', purchase_date) AS TEXT) as year,
       purchase_week as week, MIN(purchase_date) as start_date
@@ -517,7 +521,7 @@ app.get('/api/return-rate', (req, res) => {
   // This matches the same approach as period-stats and gives accurate return attribution
   const where = [`${groupCol} != ''`, `o.order_status != 'On Trial'`];
   const params = [];
-  if (month) { where.push('o.purchase_month = ?');                       params.push(month); }
+  if (month) { where.push("strftime('%Y-%m', o.purchase_date) = ?");     params.push(month); }
   if (week)  { where.push('o.purchase_week = ?');                        params.push(week);  }
   if (year)  { where.push("strftime('%Y', o.purchase_date) = ?");        params.push(year);  }
   if (brand && groupBy !== 'brand') { where.push('o.brand = ?');         params.push(brand); }
