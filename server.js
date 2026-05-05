@@ -591,17 +591,25 @@ app.get('/api/return-rate', (req, res) => {
       `SELECT SUM(quantity) as n FROM orders WHERE ${oF.sql}`
     ).get(...oF.params)?.n || 0;
 
-    // Build EXISTS filter on orders side for returns
-    const existsClauses = [`o.amazon_order_id = r.order_id`, `o.order_status != 'On Trial'`];
-    const existsParams  = [];
-    if (month) { existsClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`); existsParams.push(month); }
-    if (week)  { existsClauses.push(`o.purchase_week = ?`);                    existsParams.push(week);  }
-    if (year)  { existsClauses.push(`strftime('%Y', o.purchase_date) = ?`);    existsParams.push(year);  }
-    if (brand && groupBy !== 'brand') { existsClauses.push(`o.brand = ?`);     existsParams.push(brand); }
-    const totalReturns = db.prepare(
-      `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r
-       WHERE EXISTS (SELECT 1 FROM orders o WHERE ${existsClauses.join(' AND ')})`
-    ).get(...existsParams)?.n || 0;
+    // Returns: query directly from returns table (no join) so it matches the dashboard total.
+    // When filters are active, filter by return_month / return_date to scope correctly.
+    let totalReturns;
+    if (!month && !week && !year && !brand && !style) {
+      // No filters — just count everything (matches dashboard exactly)
+      totalReturns = db.prepare(`SELECT COALESCE(SUM(quantity), 0) as n FROM returns`).get()?.n || 0;
+    } else {
+      // Filtered — count returns linked to orders that match the filter via EXISTS
+      const exClauses = [`o.amazon_order_id = r.order_id`, `o.order_status != 'On Trial'`];
+      const exParams  = [];
+      if (month) { exClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`); exParams.push(month); }
+      if (week)  { exClauses.push(`o.purchase_week = ?`);                    exParams.push(week);  }
+      if (year)  { exClauses.push(`strftime('%Y', o.purchase_date) = ?`);    exParams.push(year);  }
+      if (brand && groupBy !== 'brand') { exClauses.push(`o.brand = ?`);     exParams.push(brand); }
+      totalReturns = db.prepare(
+        `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r
+         WHERE EXISTS (SELECT 1 FROM orders o WHERE ${exClauses.join(' AND ')})`
+      ).get(...exParams)?.n || 0;
+    }
 
     const avgRate = totalOrders > 0 ? (totalReturns / totalOrders * 100).toFixed(1) : null;
 
