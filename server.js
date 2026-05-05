@@ -482,22 +482,27 @@ app.get('/api/returns', (req, res) => {
 
 // GET /api/filters
 app.get('/api/filters', (req, res) => {
-  const reasons = db.prepare(`SELECT DISTINCT reason FROM returns WHERE reason != '' ORDER BY reason`).all().map(r => r.reason);
-  const brands = db.prepare(`SELECT DISTINCT brand FROM orders WHERE brand != '' AND brand != '-' AND brand != '0' ORDER BY brand`).all().map(r => r.brand);
-  const months = db.prepare(`SELECT DISTINCT return_month FROM returns WHERE return_month != '' ORDER BY MIN(return_date) DESC`).all().map(r => r.return_month);
-  const dispositions = db.prepare(`SELECT DISTINCT disposition FROM returns WHERE disposition != '' ORDER BY disposition`).all().map(r => r.disposition);
-  const orderMonths = db.prepare(`
-    SELECT DISTINCT strftime('%Y-%m', purchase_date) as month
-    FROM orders WHERE purchase_date != '' AND purchase_date IS NOT NULL
-    ORDER BY month DESC
-  `).all().map(r => r.month).filter(Boolean);
-  const weeks = db.prepare(`
-    SELECT CAST(strftime('%Y', purchase_date) AS TEXT) as year,
-      purchase_week as week, MIN(purchase_date) as start_date
-    FROM orders WHERE purchase_date != '' AND purchase_week IS NOT NULL
-    GROUP BY year, week ORDER BY year DESC, week DESC LIMIT 156
-  `).all();
-  res.json({ reasons, brands, months, dispositions, orderMonths, weeks });
+  try {
+    const reasons = db.prepare(`SELECT DISTINCT reason FROM returns WHERE reason != '' ORDER BY reason`).all().map(r => r.reason);
+    const brands = db.prepare(`SELECT DISTINCT brand FROM orders WHERE brand != '' AND brand != '-' AND brand != '0' ORDER BY brand`).all().map(r => r.brand);
+    const months = db.prepare(`SELECT DISTINCT return_month FROM returns WHERE return_month != '' ORDER BY return_month DESC`).all().map(r => r.return_month);
+    const dispositions = db.prepare(`SELECT DISTINCT disposition FROM returns WHERE disposition != '' ORDER BY disposition`).all().map(r => r.disposition);
+    const orderMonths = db.prepare(`
+      SELECT strftime('%Y-%m', purchase_date) as month
+      FROM orders WHERE purchase_date IS NOT NULL AND purchase_date != ''
+      GROUP BY month ORDER BY month DESC
+    `).all().map(r => r.month).filter(Boolean);
+    const weeks = db.prepare(`
+      SELECT strftime('%Y', purchase_date) as year,
+        purchase_week as week, MIN(purchase_date) as start_date
+      FROM orders WHERE purchase_date != '' AND purchase_week IS NOT NULL
+      GROUP BY year, week ORDER BY year DESC, week DESC LIMIT 156
+    `).all();
+    res.json({ reasons, brands, months, dispositions, orderMonths, weeks });
+  } catch(e) {
+    console.error('filters error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/return-rate?groupBy=sku|style|brand&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders
