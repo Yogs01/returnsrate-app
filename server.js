@@ -71,14 +71,53 @@ const insertReturn = db.prepare(`
    @gender, @brand, @customer_comments, @row_hash)
 `);
 
+// Known brands sorted longest-first to avoid partial prefix matches
+const KNOWN_BRANDS = [
+  'Good Smile Company','GOOD SMILE COMPANY','Teenage Mutant Ninja Turtles',
+  'Dungeons & Dragons','Under Armour','Diamond Select','Orange Rouge',
+  'The Loyal Subjects','Max Factory','Square Enix','Games Workshop',
+  'Hiya Toys','Hot Toys','Sen-Ti-Nel','Sen-ti-nel','Warhammer 40k',
+  'Fjallraven','Hydro Flask','Loungefly','CamelBak','ThreeZero',
+  'Mezco','Funko','FUNKO','Hasbro','Mattel','Bandai','Capcom','NECA',
+  'Megahouse','Furyu','SEGA','Vionic','Timberland','Saucony','Rockport',
+  'Reebok','Merrell','MERRELL','GARMONT','Brooks','K-Swiss','ASICS',
+  'Clarks','Chaco','MARMOT','Kelty','ALTRA','OOFOS','Hestra','Sperry',
+  'DenTek','Sharpie','HOKA','KEEN','ECCO','MUCK','Muck','Smith','SMITH',
+  'Cole Haan','adidas','Nike','Veja','Crocs','Birkenstock','Salomon',
+  'Teva','UGG','Bogs','Sorel','Danner','Oboz','New Balance','Puma',
+  'Osprey','Gregory','Deuter','Thule','Patagonia','Columbia','Arc\'teryx',
+  'Cotopaxi','Eagle Creek','Warhammer','On'
+].sort((a, b) => b.length - a.length);
+
+function extractBrandFromName(productName) {
+  if (!productName || productName === '-') return null;
+  const p = productName.trim();
+  // 1. Known brand as prefix
+  for (const brand of KNOWN_BRANDS) {
+    if (p.toLowerCase().startsWith(brand.toLowerCase())) return brand;
+  }
+  // 2. "Brand - Product" dash pattern
+  const m = p.match(/^([A-Za-z0-9][^-]{1,30}?)\s*[-–]\s+\S/);
+  if (m) {
+    const c = m[1].trim();
+    if (c.length >= 2 && c.length <= 30) return c;
+  }
+  return null;
+}
+
 function buildOrderRecord(row) {
   const pd = parseDate(row['Purchase Date2'] || row['purchase-date']);
+  const rawBrand = String(row['Brand'] || '').trim();
+  const productName = String(row['product-name'] || '').trim();
+  const brand = (rawBrand && rawBrand !== '-' && rawBrand !== '0')
+    ? rawBrand
+    : (extractBrandFromName(productName) || rawBrand);
   return {
     identifier: String(row['Identifier'] || row['Duplicate Id'] || '').trim(),
     purchase_month: String(row['Purchase Month'] || '').trim(),
     purchase_date: pd,
     purchase_week: getWeek(pd),
-    brand: String(row['Brand'] || '').trim(),
+    brand,
     amazon_order_id: String(row['amazon-order-id'] || '').trim(),
     order_status: String(row['order-status'] || '').trim(),
     product_name: String(row['product-name'] || '').trim(),
@@ -674,6 +713,57 @@ app.delete('/api/returns/dedup', (req, res) => {
   const after = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
   console.log(`dedup returns: removed ${before - after} duplicate rows, ${after} remain`);
   res.json({ deleted: before - after, remaining: after });
+});
+
+// GET /api/fix-brands — one-time migration: fills in brand for orders where brand is blank/dash/0
+// by extracting it from the product_name using known brand list + dash-prefix pattern
+app.get('/api/fix-brands', (req, res) => {
+  // Fetch all orders with bad brand
+  const badRows = db.prepare(`
+    SELECT id, product_name FROM orders
+    WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0')
+      AND product_name IS NOT NULL AND product_name != '' AND product_name != '-'
+  `).all();
+
+  const updateStmt = db.prepare(`UPDATE orders SET brand = ? WHERE id = ?`);
+  let fixed = 0, skipped = 0;
+
+  db.transaction(() => {
+    for (const row of badRows) {
+      const brand = extractBrandFromName(row.product_name);
+      if (brand) {
+        updateStmt.run(brand, row.id);
+        fixed++;
+      } else {
+        skipped++;
+      }
+    }
+  })();
+
+  // Also fix returns table
+  const badReturns = db.prepare(`
+    SELECT id, product_name FROM returns
+    WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0')
+      AND product_name IS NOT NULL AND product_name != '' AND product_name != '-'
+  `).all();
+
+  const updateReturnStmt = db.prepare(`UPDATE returns SET brand = ? WHERE id = ?`);
+  let fixedReturns = 0;
+
+  db.transaction(() => {
+    for (const row of badReturns) {
+      const brand = extractBrandFromName(row.product_name);
+      if (brand) { updateReturnStmt.run(brand, row.id); fixedReturns++; }
+    }
+  })();
+
+  console.log(`fix-brands: orders fixed=${fixed} skipped=${skipped}, returns fixed=${fixedReturns}`);
+  res.send(`
+    <h2>Brand Fix Done ✅</h2>
+    <p>Orders updated: <b>${fixed}</b> (${skipped} could not be extracted)</p>
+    <p>Returns updated: <b>${fixedReturns}</b></p>
+    <br><a href="/">← Back to Dashboard</a>
+  `);
 });
 
 // DELETE /api/returns/cleanup-empty-disposition — removes old returns rows that have no disposition
