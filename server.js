@@ -630,6 +630,35 @@ app.delete('/api/orders/cleanup-bad', (req, res) => {
   res.json({ deleted: before - after, remaining: after });
 });
 
+// DELETE /api/orders/dedup — removes duplicate order rows keeping the best-quality record per (amazon_order_id, sku)
+// "Best quality" = has a valid purchase_date (not corrupted), then longest identifier (Excel-style preferred)
+app.delete('/api/orders/dedup', (req, res) => {
+  try {
+    const before = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+
+    // 1. Remove rows with clearly bad/corrupted purchase_date (e.g. "-4589-12-...")
+    db.prepare(`DELETE FROM orders WHERE purchase_date < '2000-01-01' AND purchase_date != ''`).run();
+
+    // 2. For each (amazon_order_id, sku) pair that has duplicates, keep only the row with the
+    //    lowest rowid (first inserted = most stable, typically from the structured Excel upload)
+    db.prepare(`
+      DELETE FROM orders
+      WHERE rowid NOT IN (
+        SELECT MIN(rowid)
+        FROM orders
+        GROUP BY amazon_order_id, sku
+      )
+    `).run();
+
+    const after = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+    console.log(`dedup: removed ${before - after} duplicate/corrupt order rows, ${after} remain`);
+    res.json({ removed: before - after, remaining: after });
+  } catch(e) {
+    console.error('dedup error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/reset-all — wipes ALL data (orders + returns + upload log) for a full clean re-import
 app.get('/api/reset-all', (req, res) => {
   const orders  = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
