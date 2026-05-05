@@ -457,58 +457,45 @@ app.get('/api/return-rate', (req, res) => {
   const limit   = 50;
   const offset  = (page - 1) * limit;
 
-  const groupCol = groupBy === 'brand' ? 'brand'
-                 : groupBy === 'style' ? 'product_name'
-                 : 'sku';
+  const groupCol = groupBy === 'brand' ? 'o.brand'
+                 : groupBy === 'style' ? 'o.product_name'
+                 : 'o.sku';
 
-  const oWhere = [`o.${groupCol} != ''`, `o.order_status != 'On Trial'`];
-  const oParams = [];
-  if (month) { oWhere.push('o.purchase_month = ?'); oParams.push(month); }
-  if (week)  { oWhere.push('o.purchase_week = ?');  oParams.push(week); }
-  if (year)  { oWhere.push("strftime('%Y', o.purchase_date) = ?"); oParams.push(year); }
-  if (brand && groupBy !== 'brand') { oWhere.push('o.brand = ?');          oParams.push(brand); }
-  if (style && groupBy !== 'style') { oWhere.push('o.product_name LIKE ?'); oParams.push(`%${style}%`); }
-
-  const rWhere = [`r.${groupCol} != ''`];
-  const rParams = [];
-  if (month) { rWhere.push('r.return_month = ?'); rParams.push(month); }
-  if (week)  { rWhere.push('r.return_week = ?');  rParams.push(week); }
-  if (year)  { rWhere.push("strftime('%Y', r.return_date) = ?"); rParams.push(year); }
-  if (brand && groupBy !== 'brand') { rWhere.push('r.brand = ?');          rParams.push(brand); }
-  if (style && groupBy !== 'style') { rWhere.push('r.product_name LIKE ?'); rParams.push(`%${style}%`); }
+  // All filters are applied to the ORDER (purchase side), returns are matched via order_id
+  // This matches the same approach as period-stats and gives accurate return attribution
+  const where = [`${groupCol} != ''`, `o.order_status != 'On Trial'`];
+  const params = [];
+  if (month) { where.push('o.purchase_month = ?');                       params.push(month); }
+  if (week)  { where.push('o.purchase_week = ?');                        params.push(week);  }
+  if (year)  { where.push("strftime('%Y', o.purchase_date) = ?");        params.push(year);  }
+  if (brand && groupBy !== 'brand') { where.push('o.brand = ?');         params.push(brand); }
+  if (style && groupBy !== 'style') { where.push('o.product_name LIKE ?'); params.push(`%${style}%`); }
 
   const orderSQL = sort === 'returns' ? 'returns_qty DESC, return_rate DESC'
                  : sort === 'orders'  ? 'orders_qty DESC'
                  : 'return_rate DESC, returns_qty DESC';
 
+  // Join returns to orders via order_id — same as period-stats endpoint
   const coreSql = `
     SELECT
-      o_agg.grp                                                                          AS name,
-      MAX(o_agg.sample_name)                                                             AS sample_name,
-      MAX(o_agg.sample_brand)                                                            AS sample_brand,
-      o_agg.orders_qty,
-      COALESCE(r_agg.returns_qty, 0)                                                     AS returns_qty,
-      ROUND(COALESCE(r_agg.returns_qty, 0) * 100.0 / NULLIF(o_agg.orders_qty, 0), 1)   AS return_rate
-    FROM (
-      SELECT o.${groupCol} AS grp, MAX(o.product_name) AS sample_name, MAX(o.brand) AS sample_brand,
-        SUM(o.quantity) AS orders_qty
-      FROM orders o WHERE ${oWhere.join(' AND ')}
-      GROUP BY o.${groupCol}
-    ) o_agg
-    LEFT JOIN (
-      SELECT r.${groupCol} AS grp, SUM(r.quantity) AS returns_qty
-      FROM returns r WHERE ${rWhere.join(' AND ')}
-      GROUP BY r.${groupCol}
-    ) r_agg ON r_agg.grp = o_agg.grp
-    WHERE o_agg.orders_qty > 0
+      ${groupCol}                                                                              AS name,
+      MAX(o.product_name)                                                                      AS sample_name,
+      MAX(o.brand)                                                                             AS sample_brand,
+      SUM(CASE WHEN o.order_status != 'On Trial' THEN o.quantity ELSE 0 END)                  AS orders_qty,
+      COALESCE(SUM(r.quantity), 0)                                                             AS returns_qty,
+      ROUND(COALESCE(SUM(r.quantity), 0) * 100.0 /
+        NULLIF(SUM(CASE WHEN o.order_status != 'On Trial' THEN o.quantity ELSE 0 END), 0), 1) AS return_rate
+    FROM orders o
+    LEFT JOIN returns r ON r.order_id = o.amazon_order_id
+    WHERE ${where.join(' AND ')}
+    GROUP BY ${groupCol}
+    HAVING orders_qty > 0
   `;
 
-  const allParams = [...oParams, ...rParams];
-
   try {
-    const stats   = db.prepare(`SELECT COUNT(*) as total, AVG(return_rate) as avg_rate, MAX(return_rate) as max_rate FROM (${coreSql})`).get(...allParams);
-    const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...allParams, limit, offset);
-    const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...allParams);
+    const stats   = db.prepare(`SELECT COUNT(*) as total, AVG(return_rate) as avg_rate, MAX(return_rate) as max_rate FROM (${coreSql})`).get(...params);
+    const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...params);
     res.json({
       records, total: stats.total, page, pages: Math.ceil(stats.total / limit),
       groupBy,
