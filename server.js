@@ -569,7 +569,7 @@ app.get('/api/return-rate', (req, res) => {
     LEFT JOIN (
       SELECT o.${groupCol} AS name, SUM(r.quantity) AS returns_qty
       FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
       WHERE ${rF.sql}
       GROUP BY o.${groupCol}
     ) ra ON ra.name = oa.name
@@ -589,7 +589,7 @@ app.get('/api/return-rate', (req, res) => {
       `SELECT SUM(quantity) as n FROM orders WHERE ${oF.sql}`
     ).get(...oF.params)?.n || 0;
     const totalReturns = db.prepare(
-      `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r JOIN orders o ON r.order_id = o.amazon_order_id WHERE ${rF.sql}`
+      `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku WHERE ${rF.sql}`
     ).get(...rF.params)?.n || 0;
 
     const avgRate = totalOrders > 0 ? (totalReturns / totalOrders * 100).toFixed(1) : null;
