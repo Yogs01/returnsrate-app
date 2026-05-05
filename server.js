@@ -507,16 +507,17 @@ app.get('/api/filters', (req, res) => {
 
 // GET /api/return-rate?groupBy=sku|style|brand&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders
 app.get('/api/return-rate', (req, res) => {
-  const groupBy = ['sku', 'style', 'brand'].includes(req.query.groupBy) ? req.query.groupBy : 'sku';
-  const month   = req.query.month  || '';
-  const week    = req.query.week   ? parseInt(req.query.week)  : null;
-  const year    = req.query.year   ? String(req.query.year)    : '';
-  const brand   = req.query.brand  || '';
-  const style   = req.query.style  || '';
-  const sort    = ['rate', 'returns', 'orders'].includes(req.query.sort) ? req.query.sort : 'rate';
-  const page    = Math.max(1, parseInt(req.query.page) || 1);
-  const limit   = 50;
-  const offset  = (page - 1) * limit;
+  const groupBy  = ['sku', 'style', 'brand'].includes(req.query.groupBy) ? req.query.groupBy : 'sku';
+  const month    = req.query.month  || '';
+  const week     = req.query.week   ? parseInt(req.query.week)  : null;
+  const year     = req.query.year   ? String(req.query.year)    : '';
+  const brand    = req.query.brand  || '';
+  const style    = req.query.style  || '';
+  const sort     = ['rate', 'returns', 'orders'].includes(req.query.sort) ? req.query.sort : 'rate';
+  const minOrders = Math.max(1, parseInt(req.query.minOrders) || 1);
+  const page     = Math.max(1, parseInt(req.query.page) || 1);
+  const limit    = 50;
+  const offset   = (page - 1) * limit;
 
   const groupCol = groupBy === 'brand' ? 'brand'
                  : groupBy === 'style' ? 'product_name'
@@ -572,7 +573,7 @@ app.get('/api/return-rate', (req, res) => {
       WHERE ${rF.sql}
       GROUP BY o.${groupCol}
     ) ra ON ra.name = oa.name
-    WHERE oa.orders_qty > 0
+    WHERE oa.orders_qty >= ${minOrders}
   `;
 
   // All params = order-side params + return-side params (each subquery bound separately)
@@ -595,7 +596,7 @@ app.get('/api/return-rate', (req, res) => {
 
     res.json({
       records, total: stats.total, page, pages: Math.ceil(stats.total / limit),
-      groupBy, avgRate,
+      groupBy, avgRate, totalOrders, totalReturns,
       maxRate: stats.max_rate != null ? parseFloat(stats.max_rate).toFixed(1) : null,
       topRow
     });

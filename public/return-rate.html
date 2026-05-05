@@ -95,7 +95,7 @@
     <!-- Stat cards -->
     <div class="stat-grid-3" id="statCards">
       <div class="stat-card"><div class="label">Total Items</div><div class="value" id="sTotalItems">—</div><div class="sub" id="sTotalSub">—</div></div>
-      <div class="stat-card"><div class="label">Avg Return Rate</div><div class="value" id="sAvgRate">—</div><div class="sub">across all items</div></div>
+      <div class="stat-card"><div class="label">Avg Return Rate</div><div class="value" id="sAvgRate">—</div><div class="sub" id="sAvgSub">total returns ÷ total orders</div></div>
       <div class="stat-card"><div class="label">Worst Offender</div><div class="value red" id="sWorstRate">—</div><div class="sub" id="sWorstName" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div></div>
     </div>
 
@@ -123,6 +123,17 @@
             <option value="">All Brands</option>
           </select>
           <input type="text" id="styleSearch" placeholder="Search style / product…" oninput="debounce()" />
+          <div style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+            <label style="font-size:12px;color:var(--text-muted)">Min orders:</label>
+            <select id="minOrdersFilter" onchange="load(1)" style="padding:7px 8px;border:1px solid var(--border);border-radius:7px;font-size:13px">
+              <option value="1">1+</option>
+              <option value="5">5+</option>
+              <option value="10" selected>10+</option>
+              <option value="25">25+</option>
+              <option value="50">50+</option>
+              <option value="100">100+</option>
+            </select>
+          </div>
           <button class="btn btn-outline" onclick="clearFilters()" style="font-size:12px;padding:7px 12px">Clear</button>
         </div>
       </div>
@@ -234,20 +245,22 @@ function toggleSort(col) {
 function debounce() { clearTimeout(debTimer); debTimer = setTimeout(() => load(1), 350); }
 
 function clearFilters() {
-  document.getElementById('monthFilter').value = '';
-  document.getElementById('weekFilter').value  = '';
-  document.getElementById('brandFilter').value = '';
-  document.getElementById('styleSearch').value = '';
+  document.getElementById('monthFilter').value    = '';
+  document.getElementById('weekFilter').value     = '';
+  document.getElementById('brandFilter').value    = '';
+  document.getElementById('styleSearch').value    = '';
+  document.getElementById('minOrdersFilter').value = '10';
   load(1);
 }
 
 async function load(page) {
   currentPage = page || currentPage;
 
-  const month   = document.getElementById('monthFilter').value;
-  const weekRaw = document.getElementById('weekFilter').value;
-  const brand   = document.getElementById('brandFilter').value;
-  const style   = document.getElementById('styleSearch').value;
+  const month     = document.getElementById('monthFilter').value;
+  const weekRaw   = document.getElementById('weekFilter').value;
+  const brand     = document.getElementById('brandFilter').value;
+  const style     = document.getElementById('styleSearch').value;
+  const minOrders = document.getElementById('minOrdersFilter').value;
 
   let week = '', year = '';
   if (weekRaw) {
@@ -256,7 +269,7 @@ async function load(page) {
 
   const qs = new URLSearchParams({
     groupBy: currentView, sort: currentSort, page: currentPage,
-    month, week, year, brand, style
+    month, week, year, brand, style, minOrders
   });
 
   document.getElementById('tableBody').innerHTML =
@@ -277,9 +290,11 @@ async function load(page) {
 
 function renderStats(d) {
   const label = currentView === 'sku' ? 'SKUs' : currentView === 'style' ? 'Styles' : 'Brands';
+  const minO  = document.getElementById('minOrdersFilter').value;
   document.getElementById('sTotalItems').textContent = n(d.total);
-  document.getElementById('sTotalSub').textContent   = `${label} tracked`;
+  document.getElementById('sTotalSub').textContent   = `${label} with ${minO}+ orders`;
   document.getElementById('sAvgRate').textContent    = d.avgRate != null ? fmtPct(d.avgRate) : '—';
+  document.getElementById('sAvgSub').textContent     = `${n(d.totalReturns)} returns / ${n(d.totalOrders)} orders`;
   document.getElementById('sWorstRate').textContent  = d.topRow  ? fmtPct(d.topRow.return_rate) : '—';
   document.getElementById('sWorstName').textContent  = d.topRow  ? (d.topRow.name || '—') : '—';
   document.getElementById('sWorstName').title        = d.topRow  ? (d.topRow.sample_name || d.topRow.name || '') : '';
