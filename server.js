@@ -518,63 +518,84 @@ app.get('/api/return-rate', (req, res) => {
   const limit   = 50;
   const offset  = (page - 1) * limit;
 
-  const groupCol = groupBy === 'brand' ? 'o.brand'
-                 : groupBy === 'style' ? 'o.product_name'
-                 : 'o.sku';
+  const groupCol = groupBy === 'brand' ? 'brand'
+                 : groupBy === 'style' ? 'product_name'
+                 : 'sku';
 
-  // All filters are applied to the ORDER (purchase side), returns are matched via order_id
-  // This matches the same approach as period-stats and gives accurate return attribution
-  const where = [`${groupCol} != ''`, `o.order_status != 'On Trial'`];
-  const params = [];
-  if (month) { where.push("strftime('%Y-%m', o.purchase_date) = ?");     params.push(month); }
-  if (week)  { where.push('o.purchase_week = ?');                        params.push(week);  }
-  if (year)  { where.push("strftime('%Y', o.purchase_date) = ?");        params.push(year);  }
-  if (brand && groupBy !== 'brand') { where.push('o.brand = ?');         params.push(brand); }
-  if (style && groupBy !== 'style') { where.push('o.product_name LIKE ?'); params.push(`%${style}%`); }
+  // Build filter clauses for the orders table — used in both subqueries (with/without table prefix)
+  const buildFilters = (prefix = '') => {
+    const p = prefix ? `${prefix}.` : '';
+    const clauses = [`${p}order_status != 'On Trial'`, `${p}${groupCol} != ''`];
+    const vals = [];
+    if (month) { clauses.push(`strftime('%Y-%m', ${p}purchase_date) = ?`); vals.push(month); }
+    if (week)  { clauses.push(`${p}purchase_week = ?`);                    vals.push(week);  }
+    if (year)  { clauses.push(`strftime('%Y', ${p}purchase_date) = ?`);    vals.push(year);  }
+    if (brand && groupBy !== 'brand') { clauses.push(`${p}brand = ?`);     vals.push(brand); }
+    if (style && groupBy !== 'style') { clauses.push(`${p}product_name LIKE ?`); vals.push(`%${style}%`); }
+    return { sql: clauses.join(' AND '), params: vals };
+  };
+
+  // Orders aggregated WITHOUT the returns join — avoids quantity being multiplied
+  // by number of return records per order
+  const oF = buildFilters();   // no prefix — selects directly from orders
+  const rF = buildFilters('o'); // 'o' prefix — orders aliased as o in the returns subquery
 
   const orderSQL = sort === 'returns' ? 'returns_qty DESC, return_rate DESC'
                  : sort === 'orders'  ? 'orders_qty DESC'
                  : 'return_rate DESC, returns_qty DESC';
 
-  // Join returns to orders via order_id — same as period-stats endpoint
+  // Aggregate orders and returns SEPARATELY, then join the aggregates.
+  // This prevents the classic JOIN-inflation bug where an order with N return records
+  // gets its quantity counted N times in SUM(o.quantity).
   const coreSql = `
     SELECT
-      ${groupCol}                                                                              AS name,
-      MAX(o.product_name)                                                                      AS sample_name,
-      MAX(o.brand)                                                                             AS sample_brand,
-      SUM(CASE WHEN o.order_status != 'On Trial' THEN o.quantity ELSE 0 END)                  AS orders_qty,
-      COALESCE(SUM(r.quantity), 0)                                                             AS returns_qty,
-      ROUND(COALESCE(SUM(r.quantity), 0) * 100.0 /
-        NULLIF(SUM(CASE WHEN o.order_status != 'On Trial' THEN o.quantity ELSE 0 END), 0), 1) AS return_rate
-    FROM orders o
-    LEFT JOIN returns r ON r.order_id = o.amazon_order_id
-    WHERE ${where.join(' AND ')}
-    GROUP BY ${groupCol}
-    HAVING orders_qty > 0
+      oa.name,
+      oa.sample_name,
+      oa.sample_brand,
+      oa.orders_qty,
+      COALESCE(ra.returns_qty, 0)                                                AS returns_qty,
+      ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)  AS return_rate
+    FROM (
+      SELECT
+        ${groupCol}                                                               AS name,
+        MAX(product_name)                                                         AS sample_name,
+        MAX(brand)                                                                AS sample_brand,
+        SUM(quantity)                                                             AS orders_qty
+      FROM orders
+      WHERE ${oF.sql}
+      GROUP BY ${groupCol}
+    ) oa
+    LEFT JOIN (
+      SELECT o.${groupCol} AS name, SUM(r.quantity) AS returns_qty
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id
+      WHERE ${rF.sql}
+      GROUP BY o.${groupCol}
+    ) ra ON ra.name = oa.name
+    WHERE oa.orders_qty > 0
   `;
 
-  // Weighted overall rate: SUM(all returns) / SUM(all orders) — same as Excel calculation
-  const weightedSql = `
-    SELECT
-      SUM(CASE WHEN o.order_status != 'On Trial' THEN o.quantity ELSE 0 END) AS total_orders,
-      COALESCE(SUM(r.quantity), 0) AS total_returns
-    FROM orders o
-    LEFT JOIN returns r ON r.order_id = o.amazon_order_id
-    WHERE ${where.join(' AND ')}
-  `;
+  // All params = order-side params + return-side params (each subquery bound separately)
+  const allParams = [...oF.params, ...rF.params];
 
   try {
-    const stats    = db.prepare(`SELECT COUNT(*) as total, MAX(return_rate) as max_rate FROM (${coreSql})`).get(...params);
-    const weighted = db.prepare(weightedSql).get(...params);
-    const records  = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...params, limit, offset);
-    const topRow   = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...params);
-    const avgRate  = weighted.total_orders > 0
-      ? (weighted.total_returns / weighted.total_orders * 100).toFixed(1)
-      : null;
+    const stats   = db.prepare(`SELECT COUNT(*) as total, MAX(return_rate) as max_rate FROM (${coreSql})`).get(...allParams);
+    const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...allParams, limit, offset);
+    const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...allParams);
+
+    // Weighted overall rate: totals computed WITHOUT join to avoid inflation
+    const totalOrders  = db.prepare(
+      `SELECT SUM(quantity) as n FROM orders WHERE ${oF.sql}`
+    ).get(...oF.params)?.n || 0;
+    const totalReturns = db.prepare(
+      `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r JOIN orders o ON r.order_id = o.amazon_order_id WHERE ${rF.sql}`
+    ).get(...rF.params)?.n || 0;
+
+    const avgRate = totalOrders > 0 ? (totalReturns / totalOrders * 100).toFixed(1) : null;
+
     res.json({
       records, total: stats.total, page, pages: Math.ceil(stats.total / limit),
-      groupBy,
-      avgRate,
+      groupBy, avgRate,
       maxRate: stats.max_rate != null ? parseFloat(stats.max_rate).toFixed(1) : null,
       topRow
     });
