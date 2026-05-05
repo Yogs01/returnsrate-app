@@ -77,16 +77,18 @@ const KNOWN_BRANDS = [
   'Dungeons & Dragons','Under Armour','Diamond Select','Orange Rouge',
   'The Loyal Subjects','Max Factory','Square Enix','Games Workshop',
   'Hiya Toys','Hot Toys','Sen-Ti-Nel','Sen-ti-nel','Warhammer 40k',
+  'Jason Markk','SAXX Underwear Co.','SAXX','Hey Dude','HEYDUDE',
   'Fjallraven','Hydro Flask','Loungefly','CamelBak','ThreeZero',
   'Mezco','Funko','FUNKO','Hasbro','Mattel','Bandai','Capcom','NECA',
   'Megahouse','Furyu','SEGA','Vionic','Timberland','Saucony','Rockport',
   'Reebok','Merrell','MERRELL','GARMONT','Brooks','K-Swiss','ASICS',
   'Clarks','Chaco','MARMOT','Kelty','ALTRA','OOFOS','Hestra','Sperry',
-  'DenTek','Sharpie','HOKA','KEEN','ECCO','MUCK','Muck','Smith','SMITH',
-  'Cole Haan','adidas','Nike','Veja','Crocs','Birkenstock','Salomon',
-  'Teva','UGG','Bogs','Sorel','Danner','Oboz','New Balance','Puma',
-  'Osprey','Gregory','Deuter','Thule','Patagonia','Columbia','Arc\'teryx',
-  'Cotopaxi','Eagle Creek','Warhammer','On'
+  'DenTek','Sharpie','HOKA','Hoka','KEEN','ECCO','MUCK','Muck',
+  'Smith','SMITH','Cole Haan','adidas','Nike','Veja','Crocs',
+  'Birkenstock','Salomon','Teva','UGG','Bogs','Sorel','Danner','Oboz',
+  'New Balance','Puma','Osprey','Gregory','Deuter','Thule','Patagonia',
+  'Columbia','Arc\'teryx','Cotopaxi','Eagle Creek','Warhammer',
+  'Keds','REEF','Caterpillar','CAT Footwear','On'
 ].sort((a, b) => b.length - a.length);
 
 function extractBrandFromName(productName) {
@@ -96,7 +98,18 @@ function extractBrandFromName(productName) {
   for (const brand of KNOWN_BRANDS) {
     if (p.toLowerCase().startsWith(brand.toLowerCase())) return brand;
   }
-  // 2. "Brand - Product" dash pattern
+  // 2. Chaco Z-model codes (Z1, Z/1, Z/2, Z/X2, MEGA Z etc.)
+  if (/^(Z\d|Z\/\d|Z\/X|MEGA Z)/i.test(p)) return 'Chaco';
+
+  // 3. Warhammer kits by known unit/book names
+  const warhammerKeywords = ['XV8','Nurglings','Kill Team','Spearhead','Knight Household',
+    'Horus Heresy','Chaos Space','Space Marine','Age of Sigmar','Blood Angels',
+    'Ork ','Eldar','Necron','Tau ','Tyranid'];
+  for (const kw of warhammerKeywords) {
+    if (p.toLowerCase().includes(kw.toLowerCase())) return 'Warhammer';
+  }
+
+  // 4. "Brand - Product" dash pattern
   const m = p.match(/^([A-Za-z0-9][^-]{1,30}?)\s*[-–]\s+\S/);
   if (m) {
     const c = m[1].trim();
