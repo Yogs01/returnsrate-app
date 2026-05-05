@@ -584,13 +584,24 @@ app.get('/api/return-rate', (req, res) => {
     const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...allParams, limit, offset);
     const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...allParams);
 
-    // Weighted overall rate: totals computed WITHOUT join to avoid inflation
-    const totalOrders  = db.prepare(
+    // Weighted overall rate — match dashboard exactly
+    // Orders: direct sum (no join)
+    // Returns: use EXISTS so each return is counted once regardless of SKU format differences
+    const totalOrders = db.prepare(
       `SELECT SUM(quantity) as n FROM orders WHERE ${oF.sql}`
     ).get(...oF.params)?.n || 0;
+
+    // Build EXISTS filter on orders side for returns
+    const existsClauses = [`o.amazon_order_id = r.order_id`, `o.order_status != 'On Trial'`];
+    const existsParams  = [];
+    if (month) { existsClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`); existsParams.push(month); }
+    if (week)  { existsClauses.push(`o.purchase_week = ?`);                    existsParams.push(week);  }
+    if (year)  { existsClauses.push(`strftime('%Y', o.purchase_date) = ?`);    existsParams.push(year);  }
+    if (brand && groupBy !== 'brand') { existsClauses.push(`o.brand = ?`);     existsParams.push(brand); }
     const totalReturns = db.prepare(
-      `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku WHERE ${rF.sql}`
-    ).get(...rF.params)?.n || 0;
+      `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r
+       WHERE EXISTS (SELECT 1 FROM orders o WHERE ${existsClauses.join(' AND ')})`
+    ).get(...existsParams)?.n || 0;
 
     const avgRate = totalOrders > 0 ? (totalReturns / totalOrders * 100).toFixed(1) : null;
 
