@@ -553,15 +553,29 @@ app.get('/api/return-rate', (req, res) => {
     HAVING orders_qty > 0
   `;
 
+  // Weighted overall rate: SUM(all returns) / SUM(all orders) — same as Excel calculation
+  const weightedSql = `
+    SELECT
+      SUM(CASE WHEN o.order_status != 'On Trial' THEN o.quantity ELSE 0 END) AS total_orders,
+      COALESCE(SUM(r.quantity), 0) AS total_returns
+    FROM orders o
+    LEFT JOIN returns r ON r.order_id = o.amazon_order_id
+    WHERE ${where.join(' AND ')}
+  `;
+
   try {
-    const stats   = db.prepare(`SELECT COUNT(*) as total, AVG(return_rate) as avg_rate, MAX(return_rate) as max_rate FROM (${coreSql})`).get(...params);
-    const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...params, limit, offset);
-    const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...params);
+    const stats    = db.prepare(`SELECT COUNT(*) as total, MAX(return_rate) as max_rate FROM (${coreSql})`).get(...params);
+    const weighted = db.prepare(weightedSql).get(...params);
+    const records  = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const topRow   = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...params);
+    const avgRate  = weighted.total_orders > 0
+      ? (weighted.total_returns / weighted.total_orders * 100).toFixed(1)
+      : null;
     res.json({
       records, total: stats.total, page, pages: Math.ceil(stats.total / limit),
       groupBy,
-      avgRate:  stats.avg_rate  != null ? parseFloat(stats.avg_rate).toFixed(1)  : null,
-      maxRate:  stats.max_rate  != null ? parseFloat(stats.max_rate).toFixed(1)  : null,
+      avgRate,
+      maxRate: stats.max_rate != null ? parseFloat(stats.max_rate).toFixed(1) : null,
       topRow
     });
   } catch(e) {
