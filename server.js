@@ -178,46 +178,75 @@ function buildReturnRecord(row) {
 // In-memory job store
 const jobs = {};
 
-// Process a sheet in fixed-size batches without ever holding all rows in memory.
-// Uses XLSX dense mode: ws['!data'][row][col] — more memory-efficient than object map.
-// Calls batchCallback(rows[]) for each batch, returns total row count.
+// Stream a sheet row-by-row using ExcelJS streaming API.
+// Only one row is in memory at a time — safe for 300K+ row sheets.
+// Calls batchCallback(rows[]) synchronously for each batch.
+// Returns a Promise<number> (total data rows processed).
+const ExcelJS = require('exceljs');
+
 function processSheetBatched(filePath, sheetName, batchSize, batchCallback) {
-  const wb = XLSX.readFile(filePath, {
-    cellDates: false, sheets: sheetName, dense: true,
-    cellFormula: false, cellHTML: false, cellNF: false, cellText: false,
-  });
-  const ws = wb.Sheets[sheetName];
-  if (!ws || !ws['!data'] || !ws['!data'].length) return 0;
+  return new Promise((resolve, reject) => {
+    const options = {
+      entries: 'emit',
+      sharedStrings: 'cache',
+      hyperlinks: 'ignore',
+      styles: 'ignore',
+      worksheets: 'emit',
+    };
+    const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, options);
+    let headers = null, batch = [], total = 0, found = false;
 
-  const data = ws['!data'];
-  // Build trimmed header list from first row
-  const headerRow = data[0] || [];
-  const headers = headerRow.map(c => (c && c.v !== undefined ? String(c.v).trim() : ''));
+    workbookReader.on('worksheet', worksheetReader => {
+      if (worksheetReader.name !== sheetName) {
+        worksheetReader.destroy(); // skip other sheets
+        return;
+      }
+      found = true;
 
-  let batch = [], total = 0;
-  for (let r = 1; r < data.length; r++) {
-    const rowArr = data[r];
-    if (!rowArr) continue;
-    const row = {};
-    headers.forEach((h, i) => {
-      const cell = rowArr[i];
-      row[h] = (cell !== undefined && cell !== null && cell.v !== undefined) ? cell.v : '';
+      worksheetReader.on('row', row => {
+        if (row.number === 1) {
+          // Header row
+          headers = [];
+          row.eachCell({ includeEmpty: true }, (cell, colNum) => {
+            headers[colNum - 1] = cell.value !== null && cell.value !== undefined
+              ? String(cell.value).trim() : '';
+          });
+          return;
+        }
+        if (!headers) return;
+
+        const obj = {};
+        headers.forEach((h, i) => {
+          const cell = row.getCell(i + 1);
+          let v = cell.value;
+          // ExcelJS returns rich text as objects — flatten to string
+          if (v && typeof v === 'object' && v.richText) v = v.richText.map(r => r.text).join('');
+          if (v && typeof v === 'object' && v.result !== undefined) v = v.result; // formula result
+          obj[h] = v !== null && v !== undefined ? v : '';
+        });
+
+        batch.push(obj);
+        total++;
+        if (batch.length >= batchSize) {
+          batchCallback(batch);
+          batch = [];
+        }
+      });
+
+      worksheetReader.on('end', () => {
+        if (batch.length > 0) { batchCallback(batch); batch = []; }
+      });
+
+      worksheetReader.on('error', reject);
     });
-    batch.push(row);
-    total++;
-    if (batch.length >= batchSize) {
-      batchCallback(batch);
-      batch = [];
-    }
-  }
-  if (batch.length > 0) batchCallback(batch);
 
-  // Free the parsed workbook from memory immediately
-  wb.Sheets[sheetName] = null;
-  return total;
+    workbookReader.on('end', () => resolve(total));
+    workbookReader.on('error', reject);
+    workbookReader.read();
+  });
 }
 
-function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
+async function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
   const job = jobs[jobId];
   try {
     // Step 1: peek at sheet names only (very fast — no cell data read)
@@ -241,7 +270,7 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
       const sheetName = sheetNames.includes('All Orders Raw') ? 'All Orders Raw' : sheetNames[0];
       console.log(`[${jobId}] streaming orders sheet="${sheetName}"…`);
       let rowsSeen = 0;
-      const total = processSheetBatched(filePath, sheetName, BATCH, (batch) => {
+      const total = await processSheetBatched(filePath, sheetName, BATCH, (batch) => {
         db.transaction((b) => {
           for (const row of b) {
             const r = insertOrder.run(buildOrderRecord(row));
@@ -259,7 +288,7 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
       if (sheetName) {
         console.log(`[${jobId}] streaming returns sheet="${sheetName}"…`);
         let rowsSeen = 0;
-        const total = processSheetBatched(filePath, sheetName, BATCH, (batch) => {
+        const total = await processSheetBatched(filePath, sheetName, BATCH, (batch) => {
           db.transaction((b) => {
             for (const row of b) {
               const r = insertReturn.run(buildReturnRecord(row));
@@ -274,10 +303,9 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
     }
 
     if (!hasOrders && !hasReturns) {
-      // Auto-detect type by peeking at first batch headers
       const sheetName = sheetNames[0];
       let isReturn = null;
-      processSheetBatched(filePath, sheetName, BATCH, (batch) => {
+      await processSheetBatched(filePath, sheetName, BATCH, (batch) => {
         if (isReturn === null) {
           const colsLower = Object.keys(batch[0] || {}).map(k => k.toLowerCase());
           isReturn = colsLower.some(k =>
@@ -366,7 +394,10 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   }
 
   res.json({ success: true, jobId, processing: true, mode });
-  setImmediate(() => processFileAsync(req.file.path, dataType, uploadedBy, req.file.originalname, jobId));
+  setImmediate(() => processFileAsync(req.file.path, dataType, uploadedBy, req.file.originalname, jobId).catch(e => {
+    console.error(`[${jobId}] fatal error:`, e.message);
+    jobs[jobId].status = 'error'; jobs[jobId].error = e.message;
+  }));
 });
 
 // POST /api/import-returns — accepts pre-built JSON rows (used by seed-returns-remote.js)
