@@ -22,11 +22,27 @@
   <div class="topbar"><h1>Upload Orders & Returns Data</h1></div>
   <div class="content">
 
-    <!-- Your name -->
+    <!-- Your name + import mode -->
     <div class="card" style="margin-bottom:24px">
-      <div class="card-body" style="padding:16px 20px">
-        <label style="font-size:13px;font-weight:500;margin-bottom:6px;display:block">Your name (optional)</label>
-        <input type="text" id="uploaderName" placeholder="e.g. Maria" style="padding:8px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;width:300px;outline:none" />
+      <div class="card-body" style="padding:16px 20px;display:flex;align-items:flex-start;gap:40px;flex-wrap:wrap">
+        <div>
+          <label style="font-size:13px;font-weight:500;margin-bottom:6px;display:block">Your name (optional)</label>
+          <input type="text" id="uploaderName" placeholder="e.g. Maria" style="padding:8px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;width:260px;outline:none" />
+        </div>
+        <div>
+          <label style="font-size:13px;font-weight:500;margin-bottom:6px;display:block">Import mode</label>
+          <div style="display:flex;gap:8px">
+            <label id="modeAppendLabel" style="display:flex;align-items:center;gap:7px;padding:8px 14px;border:2px solid var(--accent);border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;background:#f0efff;color:var(--accent)">
+              <input type="radio" name="importMode" value="append" checked onchange="updateModeUI()" style="accent-color:var(--accent)"/>
+              ➕ Add new data
+            </label>
+            <label id="modeReplaceLabel" style="display:flex;align-items:center;gap:7px;padding:8px 14px;border:2px solid var(--border);border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted)">
+              <input type="radio" name="importMode" value="replace" onchange="updateModeUI()" style="accent-color:#e53e3e"/>
+              🔄 Replace all data
+            </label>
+          </div>
+          <div id="modeHint" style="font-size:11px;color:var(--text-muted);margin-top:5px">Adds only new rows, keeps existing data.</div>
+        </div>
       </div>
     </div>
 
@@ -136,6 +152,32 @@
 <script>
 const files = { orders: null, returns: null };
 
+function updateModeUI() {
+  const mode = document.querySelector('input[name="importMode"]:checked')?.value || 'append';
+  const appendLabel  = document.getElementById('modeAppendLabel');
+  const replaceLabel = document.getElementById('modeReplaceLabel');
+  const hint = document.getElementById('modeHint');
+  if (mode === 'replace') {
+    appendLabel.style.border  = '2px solid var(--border)';
+    appendLabel.style.background = '';
+    appendLabel.style.color   = 'var(--text-muted)';
+    replaceLabel.style.border = '2px solid #e53e3e';
+    replaceLabel.style.background = '#fff5f5';
+    replaceLabel.style.color  = '#e53e3e';
+    hint.innerHTML = '⚠️ <strong>Clears all existing orders &amp; returns</strong> then imports fresh from this file. Use when your file is the complete dataset.';
+    hint.style.color = '#e53e3e';
+  } else {
+    appendLabel.style.border  = '2px solid var(--accent)';
+    appendLabel.style.background = '#f0efff';
+    appendLabel.style.color   = 'var(--accent)';
+    replaceLabel.style.border = '2px solid var(--border)';
+    replaceLabel.style.background = '';
+    replaceLabel.style.color  = 'var(--text-muted)';
+    hint.innerHTML = 'Adds only new rows, keeps existing data.';
+    hint.style.color = 'var(--text-muted)';
+  }
+}
+
 // Drag & drop for both zones
 ['orders','returns'].forEach(type => {
   const zone = document.getElementById(type + 'Zone');
@@ -159,9 +201,16 @@ function handleFile(type, file) {
 async function doUpload(type) {
   if (!files[type]) return;
   const name = document.getElementById('uploaderName').value.trim() || 'Team Member';
+  const mode = document.querySelector('input[name="importMode"]:checked')?.value || 'append';
+
+  if (mode === 'replace') {
+    const ok = confirm('⚠️ Replace mode will DELETE all existing orders & returns data, then import fresh from this file.\n\nAre you sure?');
+    if (!ok) return;
+  }
+
   const btn = document.getElementById(type + 'Btn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Uploading…';
+  btn.innerHTML = `<span class="spinner"></span> Uploading…`;
   document.getElementById(type + 'Progress').style.display = 'block';
   document.getElementById(type + 'Bar').style.width = '10%';
   document.getElementById(type + 'Alert').innerHTML = '';
@@ -170,15 +219,17 @@ async function doUpload(type) {
   form.append('file', files[type]);
   form.append('uploaded_by', name);
   form.append('data_type', type);
+  form.append('mode', mode);
 
   try {
     const res = await fetch('/api/upload', { method: 'POST', body: form });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
-    // File uploaded — now poll for job completion
     document.getElementById(type + 'Bar').style.width = '20%';
-    btn.innerHTML = '<span class="spinner"></span> Importing…';
+    btn.innerHTML = mode === 'replace'
+      ? '<span class="spinner"></span> Replacing all data…'
+      : '<span class="spinner"></span> Importing…';
     await pollJob(type, data.jobId);
 
   } catch(e) {
@@ -206,10 +257,12 @@ async function pollJob(type, jobId) {
           bar.style.width = '100%';
           const added = type === 'orders' ? job.ordersAdded : job.returnsAdded;
           const skipped = type === 'orders' ? job.ordersSkipped : job.returnsSkipped;
+          const modeLabel = mode === 'replace' ? '🔄 Replaced' : '✅ Imported';
           document.getElementById(type + 'Alert').innerHTML = `
             <div class="alert alert-success">
-              ✅ <strong>${type === 'orders' ? 'Orders' : 'Returns'} imported!</strong><br>
+              ${modeLabel} <strong>${type === 'orders' ? 'Orders' : 'Returns'}!</strong><br>
               <strong>${(added||0).toLocaleString()}</strong> rows added · ${(skipped||0).toLocaleString()} skipped
+              ${job.dupsRemoved > 0 ? ` · ${job.dupsRemoved.toLocaleString()} duplicates removed` : ''}
               <a href="index.html" style="color:var(--green);font-weight:600;margin-left:8px">View Dashboard →</a>
             </div>`;
           files[type] = null;

@@ -320,15 +320,30 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
 }
 
 // POST /api/upload — responds immediately, processes in background
+// mode=replace: clears orders/returns tables first, then imports fresh from file
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const uploadedBy = req.body.uploaded_by || 'Team Member';
-  const dataType = req.body.data_type || 'auto';
+  const dataType   = req.body.data_type   || 'auto';
+  const mode       = req.body.mode        || 'append'; // 'append' or 'replace'
   const jobId = crypto.randomBytes(8).toString('hex');
-  jobs[jobId] = { status: 'processing', progress: 0, ordersAdded: 0, ordersSkipped: 0, returnsAdded: 0, returnsSkipped: 0 };
-  // Respond immediately — processing happens in background
-  res.json({ success: true, jobId, processing: true });
-  // Start processing after response is sent
+  jobs[jobId] = { status: 'processing', progress: 0, mode, ordersAdded: 0, ordersSkipped: 0, returnsAdded: 0, returnsSkipped: 0 };
+
+  // If replace mode, wipe relevant tables BEFORE importing
+  if (mode === 'replace') {
+    if (dataType === 'orders' || dataType === 'auto') {
+      db.prepare('DELETE FROM orders').run();
+      console.log(`[${jobId}] replace mode: cleared orders table`);
+    }
+    if (dataType === 'returns' || dataType === 'auto') {
+      db.prepare('DELETE FROM returns').run();
+      console.log(`[${jobId}] replace mode: cleared returns table`);
+    }
+    // Clear upload log too so file hash check doesn't block re-import
+    db.prepare('DELETE FROM upload_log').run();
+  }
+
+  res.json({ success: true, jobId, processing: true, mode });
   setImmediate(() => processFileAsync(req.file.path, dataType, uploadedBy, req.file.originalname, jobId));
 });
 
