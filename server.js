@@ -278,6 +278,30 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
       }
     }
 
+    // Auto-dedup: remove duplicate orders caused by hash mismatches between
+    // Excel date formats (.txt ISO timestamps vs .xlsx serial dates)
+    if (hasOrders || (!hasOrders && !hasReturns)) {
+      const beforeDedup = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+      db.prepare(`DELETE FROM orders WHERE purchase_date < '2000-01-01' AND purchase_date != ''`).run();
+      db.prepare(`
+        DELETE FROM orders WHERE id NOT IN (
+          SELECT id FROM (
+            SELECT id, ROW_NUMBER() OVER (
+              PARTITION BY amazon_order_id, sku
+              ORDER BY
+                CASE WHEN item_price IS NOT NULL AND item_price != 0 THEN 0 ELSE 1 END,
+                CASE WHEN purchase_date > '2000-01-01' THEN 0 ELSE 1 END,
+                id ASC
+            ) AS rn FROM orders
+          ) ranked WHERE rn = 1
+        )
+      `).run();
+      const afterDedup = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
+      const dupsRemoved = beforeDedup - afterDedup;
+      if (dupsRemoved > 0) console.log(`[${jobId}] auto-dedup removed ${dupsRemoved} duplicate order rows`);
+      job.dupsRemoved = dupsRemoved;
+    }
+
     const fHash = fileHash(filePath);
     db.prepare('INSERT OR IGNORE INTO upload_log (filename, file_hash, type, rows_added, rows_skipped, uploaded_by) VALUES (?,?,?,?,?,?)')
       .run(filename, fHash, dataType, ordersAdded + returnsAdded, ordersSkipped + returnsSkipped, uploadedBy);
