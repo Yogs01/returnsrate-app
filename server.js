@@ -178,23 +178,43 @@ function buildReturnRecord(row) {
 // In-memory job store
 const jobs = {};
 
-function readSheetFast(filePath, sheetName) {
-  // Read ONLY the requested sheet — avoids parsing all other sheets in the workbook
-  const wb = XLSX.readFile(filePath, { cellDates: false, sheets: sheetName, dense: false });
-  const sheet = wb.Sheets[sheetName];
-  if (!sheet) return [];
-  const raw = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
-  // Trim header keys once (avoid per-row Object.fromEntries overhead)
-  if (!raw.length) return raw;
-  const keys = Object.keys(raw[0]);
-  const trimmedKeys = keys.map(k => k.trim());
-  const needsTrim = keys.some((k, i) => k !== trimmedKeys[i]);
-  if (!needsTrim) return raw;
-  return raw.map(r => {
-    const out = {};
-    keys.forEach((k, i) => { out[trimmedKeys[i]] = r[k]; });
-    return out;
+// Process a sheet in fixed-size batches without ever holding all rows in memory.
+// Uses XLSX dense mode: ws['!data'][row][col] — more memory-efficient than object map.
+// Calls batchCallback(rows[]) for each batch, returns total row count.
+function processSheetBatched(filePath, sheetName, batchSize, batchCallback) {
+  const wb = XLSX.readFile(filePath, {
+    cellDates: false, sheets: sheetName, dense: true,
+    cellFormula: false, cellHTML: false, cellNF: false, cellText: false,
   });
+  const ws = wb.Sheets[sheetName];
+  if (!ws || !ws['!data'] || !ws['!data'].length) return 0;
+
+  const data = ws['!data'];
+  // Build trimmed header list from first row
+  const headerRow = data[0] || [];
+  const headers = headerRow.map(c => (c && c.v !== undefined ? String(c.v).trim() : ''));
+
+  let batch = [], total = 0;
+  for (let r = 1; r < data.length; r++) {
+    const rowArr = data[r];
+    if (!rowArr) continue;
+    const row = {};
+    headers.forEach((h, i) => {
+      const cell = rowArr[i];
+      row[h] = (cell !== undefined && cell !== null && cell.v !== undefined) ? cell.v : '';
+    });
+    batch.push(row);
+    total++;
+    if (batch.length >= batchSize) {
+      batchCallback(batch);
+      batch = [];
+    }
+  }
+  if (batch.length > 0) batchCallback(batch);
+
+  // Free the parsed workbook from memory immediately
+  wb.Sheets[sheetName] = null;
+  return total;
 }
 
 function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
@@ -212,59 +232,62 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
     }
     console.log(`[${jobId}] sheets=${JSON.stringify(sheetNames)}`);
 
+    const BATCH = 3000; // smaller batch = less peak memory
     let ordersAdded = 0, ordersSkipped = 0, returnsAdded = 0, returnsSkipped = 0;
     const hasOrders  = sheetNames.includes('All Orders Raw') || dataType === 'orders';
     const hasReturns = sheetNames.includes('Return Raw')     || dataType === 'returns';
 
     if (hasOrders) {
       const sheetName = sheetNames.includes('All Orders Raw') ? 'All Orders Raw' : sheetNames[0];
-      console.log(`[${jobId}] reading orders sheet="${sheetName}"…`);
-      const rows = readSheetFast(filePath, sheetName);
-      console.log(`[${jobId}] orders rows=${rows.length}`);
-      const BATCH = 5000;
-      for (let i = 0; i < rows.length; i += BATCH) {
-        db.transaction((batch) => {
-          for (const row of batch) {
+      console.log(`[${jobId}] streaming orders sheet="${sheetName}"…`);
+      let rowsSeen = 0;
+      const total = processSheetBatched(filePath, sheetName, BATCH, (batch) => {
+        db.transaction((b) => {
+          for (const row of b) {
             const r = insertOrder.run(buildOrderRecord(row));
             if (r.changes > 0) ordersAdded++; else ordersSkipped++;
           }
-        })(rows.slice(i, i + BATCH));
-        job.progress = Math.round((i + BATCH) / rows.length * 50); // 0–50% for orders
-      }
+        })(batch);
+        rowsSeen += batch.length;
+        job.progress = Math.min(48, Math.round(rowsSeen / 330000 * 48));
+      });
+      console.log(`[${jobId}] orders done: total=${total} added=${ordersAdded} skipped=${ordersSkipped}`);
     }
 
     if (hasReturns) {
       const sheetName = sheetNames.includes('Return Raw') ? 'Return Raw' : (hasOrders ? null : sheetNames[0]);
       if (sheetName) {
-        console.log(`[${jobId}] reading returns sheet="${sheetName}"…`);
-        const rows = readSheetFast(filePath, sheetName);
-        console.log(`[${jobId}] returns rows=${rows.length}`);
-        const BATCH = 5000;
-        for (let i = 0; i < rows.length; i += BATCH) {
-          db.transaction((batch) => {
-            for (const row of batch) {
+        console.log(`[${jobId}] streaming returns sheet="${sheetName}"…`);
+        let rowsSeen = 0;
+        const total = processSheetBatched(filePath, sheetName, BATCH, (batch) => {
+          db.transaction((b) => {
+            for (const row of b) {
               const r = insertReturn.run(buildReturnRecord(row));
               if (r.changes > 0) returnsAdded++; else returnsSkipped++;
             }
-          })(rows.slice(i, i + BATCH));
-          job.progress = 50 + Math.round((i + BATCH) / rows.length * 50); // 50–100% for returns
-        }
+          })(batch);
+          rowsSeen += batch.length;
+          job.progress = 50 + Math.min(48, Math.round(rowsSeen / 47000 * 48));
+        });
+        console.log(`[${jobId}] returns done: total=${total} added=${returnsAdded} skipped=${returnsSkipped}`);
       }
     }
 
     if (!hasOrders && !hasReturns) {
+      // Auto-detect type by peeking at first batch headers
       const sheetName = sheetNames[0];
-      const rows = readSheetFast(filePath, sheetName);
-      const colsLower = rows[0] ? Object.keys(rows[0]).map(k => k.toLowerCase()) : [];
-      const isReturn = colsLower.some(k =>
-        k === 'return-date' || k === 'return date' || k === 'return date2' ||
-        k === 'detailed-disposition' || k === 'return month'
-      );
-      console.log(`[${jobId}] auto-detect: isReturn=${isReturn} cols=${colsLower.slice(0,5).join(',')}`);
-      const BATCH = 5000;
-      for (let i = 0; i < rows.length; i += BATCH) {
-        db.transaction((batch) => {
-          for (const row of batch) {
+      let isReturn = null;
+      processSheetBatched(filePath, sheetName, BATCH, (batch) => {
+        if (isReturn === null) {
+          const colsLower = Object.keys(batch[0] || {}).map(k => k.toLowerCase());
+          isReturn = colsLower.some(k =>
+            k === 'return-date' || k === 'return date' || k === 'return date2' ||
+            k === 'detailed-disposition' || k === 'return month'
+          );
+          console.log(`[${jobId}] auto-detect: isReturn=${isReturn}`);
+        }
+        db.transaction((b) => {
+          for (const row of b) {
             if (isReturn) {
               const r = insertReturn.run(buildReturnRecord(row));
               if (r.changes > 0) returnsAdded++; else returnsSkipped++;
@@ -273,9 +296,8 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
               if (r.changes > 0) ordersAdded++; else ordersSkipped++;
             }
           }
-        })(rows.slice(i, i + BATCH));
-        job.progress = Math.round((i + BATCH) / rows.length * 100);
-      }
+        })(batch);
+      });
     }
 
     // Auto-dedup: remove duplicate orders caused by hash mismatches between
