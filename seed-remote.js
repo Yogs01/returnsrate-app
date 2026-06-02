@@ -35,6 +35,42 @@ function getWeek(ds) {
 }
 function hash(...p) { return crypto.createHash('md5').update(p.join('|')).digest('hex'); }
 
+const KNOWN_BRANDS = [
+  'Good Smile Company','GOOD SMILE COMPANY','Teenage Mutant Ninja Turtles',
+  'Dungeons & Dragons','Under Armour','Diamond Select','Orange Rouge',
+  'The Loyal Subjects','Max Factory','Square Enix','Games Workshop',
+  'Hiya Toys','Hot Toys','Sen-Ti-Nel','Sen-ti-nel','Warhammer 40k',
+  'Jason Markk','SAXX Underwear Co.','SAXX','Hey Dude','HEYDUDE',
+  'Fjallraven','Hydro Flask','Loungefly','CamelBak','ThreeZero',
+  'Mezco','Funko','FUNKO','Hasbro','Mattel','Bandai','Capcom','NECA',
+  'Megahouse','Furyu','SEGA','Vionic','Timberland','Saucony','Rockport',
+  'Reebok','Merrell','MERRELL','GARMONT','Brooks','K-Swiss','ASICS',
+  'Clarks','Chaco','MARMOT','Kelty','ALTRA','OOFOS','Hestra','Sperry',
+  'DenTek','Sharpie','HOKA','Hoka','KEEN','ECCO','MUCK','Muck',
+  'Smith','SMITH','Cole Haan','adidas','Nike','Veja','Crocs',
+  'Birkenstock','Salomon','Teva','UGG','Bogs','Sorel','Danner','Oboz',
+  'New Balance','Puma','Osprey','Gregory','Deuter','Thule','Patagonia',
+  'Columbia','Arc\'teryx','Cotopaxi','Eagle Creek','Warhammer',
+  'Keds','REEF','Caterpillar','CAT Footwear','On'
+].sort((a,b) => b.length - a.length);
+
+function extractBrand(p) {
+  if (!p || p === '-') return null;
+  for (const b of KNOWN_BRANDS) {
+    if (p.toLowerCase().startsWith(b.toLowerCase())) return b;
+  }
+  if (/^(Z\d|Z\/\d|Z\/X|MEGA Z)/i.test(p)) return 'Chaco';
+  const warhammerKw = ['XV8','Nurglings','Kill Team','Spearhead','Knight Household',
+    'Horus Heresy','Chaos Space','Space Marine','Age of Sigmar','Blood Angels',
+    'Ork ','Eldar','Necron','Tau ','Tyranid'];
+  for (const kw of warhammerKw) {
+    if (p.toLowerCase().includes(kw.toLowerCase())) return 'Warhammer';
+  }
+  const m = p.match(/^([A-Za-z0-9][^-]{1,30}?)\s*[-–]\s+\S/);
+  if (m) { const c = m[1].trim(); if (c.length >= 2 && c.length <= 30) return c; }
+  return null;
+}
+
 function postJSON(path, body) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
@@ -73,7 +109,7 @@ async function run() {
       purchase_month: String(row['Purchase Month'] || '').trim(),
       purchase_date: pd,
       purchase_week: getWeek(pd),
-      brand: String(row['Brand'] || '').trim(),
+      brand: (() => { const raw = String(row['Brand']||'').trim(); const pn = String(row['product-name']||'').trim(); return (raw && raw!=='-' && raw!=='0') ? raw : (extractBrand(pn) || raw); })(),
       amazon_order_id: String(row['amazon-order-id'] || '').trim(),
       order_status: String(row['order-status'] || '').trim(),
       product_name: String(row['product-name'] || '').trim(),

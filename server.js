@@ -178,33 +178,49 @@ function buildReturnRecord(row) {
 // In-memory job store
 const jobs = {};
 
+function readSheetFast(filePath, sheetName) {
+  // Read ONLY the requested sheet — avoids parsing all other sheets in the workbook
+  const wb = XLSX.readFile(filePath, { cellDates: false, sheets: sheetName, dense: false });
+  const sheet = wb.Sheets[sheetName];
+  if (!sheet) return [];
+  const raw = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
+  // Trim header keys once (avoid per-row Object.fromEntries overhead)
+  if (!raw.length) return raw;
+  const keys = Object.keys(raw[0]);
+  const trimmedKeys = keys.map(k => k.trim());
+  const needsTrim = keys.some((k, i) => k !== trimmedKeys[i]);
+  if (!needsTrim) return raw;
+  return raw.map(r => {
+    const out = {};
+    keys.forEach((k, i) => { out[trimmedKeys[i]] = r[k]; });
+    return out;
+  });
+}
+
 function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
   const job = jobs[jobId];
   try {
-    let wb;
+    // Step 1: peek at sheet names only (very fast — no cell data read)
+    let sheetNames;
     try {
-      wb = XLSX.readFile(filePath, { cellDates: false });
+      const peek = XLSX.readFile(filePath, { bookSheets: true });
+      sheetNames = peek.SheetNames;
     } catch (e) {
       job.status = 'error'; job.error = 'Cannot parse file: ' + e.message;
       try { fs.unlinkSync(filePath); } catch(_) {}
       return;
     }
-
-    const readSheet = (name) => {
-      const sheet = wb.Sheets[name] || wb.Sheets[wb.SheetNames[0]];
-      if (!sheet) return [];
-      const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-      return raw.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim(), v])));
-    };
+    console.log(`[${jobId}] sheets=${JSON.stringify(sheetNames)}`);
 
     let ordersAdded = 0, ordersSkipped = 0, returnsAdded = 0, returnsSkipped = 0;
-    const hasOrders = wb.SheetNames.includes('All Orders Raw') || dataType === 'orders';
-    const hasReturns = wb.SheetNames.includes('Return Raw') || dataType === 'returns';
+    const hasOrders  = sheetNames.includes('All Orders Raw') || dataType === 'orders';
+    const hasReturns = sheetNames.includes('Return Raw')     || dataType === 'returns';
 
     if (hasOrders) {
-      const sheetName = wb.SheetNames.includes('All Orders Raw') ? 'All Orders Raw' : wb.SheetNames[0];
-      const rows = readSheet(sheetName);
-      console.log(`[${jobId}] orders sheet="${sheetName}" rows=${rows.length}`);
+      const sheetName = sheetNames.includes('All Orders Raw') ? 'All Orders Raw' : sheetNames[0];
+      console.log(`[${jobId}] reading orders sheet="${sheetName}"…`);
+      const rows = readSheetFast(filePath, sheetName);
+      console.log(`[${jobId}] orders rows=${rows.length}`);
       const BATCH = 5000;
       for (let i = 0; i < rows.length; i += BATCH) {
         db.transaction((batch) => {
@@ -213,44 +229,53 @@ function processFileAsync(filePath, dataType, uploadedBy, filename, jobId) {
             if (r.changes > 0) ordersAdded++; else ordersSkipped++;
           }
         })(rows.slice(i, i + BATCH));
-        job.progress = Math.round((i + BATCH) / rows.length * 100);
+        job.progress = Math.round((i + BATCH) / rows.length * 50); // 0–50% for orders
       }
     }
 
     if (hasReturns) {
-      const sheetName = wb.SheetNames.includes('Return Raw') ? 'Return Raw' : (hasOrders ? null : wb.SheetNames[0]);
+      const sheetName = sheetNames.includes('Return Raw') ? 'Return Raw' : (hasOrders ? null : sheetNames[0]);
       if (sheetName) {
-        const rows = readSheet(sheetName);
-        console.log(`[${jobId}] returns sheet="${sheetName}" rows=${rows.length}`);
-        db.transaction((rows) => {
-          for (const row of rows) {
-            const r = insertReturn.run(buildReturnRecord(row));
-            if (r.changes > 0) returnsAdded++; else returnsSkipped++;
-          }
-        })(rows);
+        console.log(`[${jobId}] reading returns sheet="${sheetName}"…`);
+        const rows = readSheetFast(filePath, sheetName);
+        console.log(`[${jobId}] returns rows=${rows.length}`);
+        const BATCH = 5000;
+        for (let i = 0; i < rows.length; i += BATCH) {
+          db.transaction((batch) => {
+            for (const row of batch) {
+              const r = insertReturn.run(buildReturnRecord(row));
+              if (r.changes > 0) returnsAdded++; else returnsSkipped++;
+            }
+          })(rows.slice(i, i + BATCH));
+          job.progress = 50 + Math.round((i + BATCH) / rows.length * 50); // 50–100% for returns
+        }
       }
     }
 
     if (!hasOrders && !hasReturns) {
-      const rows = readSheet(wb.SheetNames[0]);
-      // Detect by checking all column names (case-insensitive) for returns-specific fields
+      const sheetName = sheetNames[0];
+      const rows = readSheetFast(filePath, sheetName);
       const colsLower = rows[0] ? Object.keys(rows[0]).map(k => k.toLowerCase()) : [];
       const isReturn = colsLower.some(k =>
         k === 'return-date' || k === 'return date' || k === 'return date2' ||
         k === 'detailed-disposition' || k === 'return month'
       );
       console.log(`[${jobId}] auto-detect: isReturn=${isReturn} cols=${colsLower.slice(0,5).join(',')}`);
-      db.transaction((rows) => {
-        for (const row of rows) {
-          if (isReturn) {
-            const r = insertReturn.run(buildReturnRecord(row));
-            if (r.changes > 0) returnsAdded++; else returnsSkipped++;
-          } else {
-            const r = insertOrder.run(buildOrderRecord(row));
-            if (r.changes > 0) ordersAdded++; else ordersSkipped++;
+      const BATCH = 5000;
+      for (let i = 0; i < rows.length; i += BATCH) {
+        db.transaction((batch) => {
+          for (const row of batch) {
+            if (isReturn) {
+              const r = insertReturn.run(buildReturnRecord(row));
+              if (r.changes > 0) returnsAdded++; else returnsSkipped++;
+            } else {
+              const r = insertOrder.run(buildOrderRecord(row));
+              if (r.changes > 0) ordersAdded++; else ordersSkipped++;
+            }
           }
-        }
-      })(rows);
+        })(rows.slice(i, i + BATCH));
+        job.progress = Math.round((i + BATCH) / rows.length * 100);
+      }
     }
 
     const fHash = fileHash(filePath);
