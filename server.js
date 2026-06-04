@@ -118,6 +118,45 @@ function extractBrandFromName(productName) {
   return null;
 }
 
+// Auto-fill blank brands from product_name for both orders and returns tables.
+// Called after every upload or JSON import. Returns { orders, returns } counts fixed.
+function runBrandFix() {
+  const updateOrders = db.prepare(`UPDATE orders  SET brand = ? WHERE id = ?`);
+  const updateRets   = db.prepare(`UPDATE returns SET brand = ? WHERE id = ?`);
+
+  const emptyOrders = db.prepare(`
+    SELECT id, product_name FROM orders
+    WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0')
+      AND product_name IS NOT NULL AND product_name != ''
+  `).all();
+
+  let fixedOrders = 0;
+  db.transaction(() => {
+    for (const row of emptyOrders) {
+      const brand = extractBrandFromName(row.product_name);
+      if (brand) { updateOrders.run(brand, row.id); fixedOrders++; }
+    }
+  })();
+
+  const emptyRets = db.prepare(`
+    SELECT id, product_name FROM returns
+    WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0')
+      AND product_name IS NOT NULL AND product_name != ''
+  `).all();
+
+  let fixedReturns = 0;
+  db.transaction(() => {
+    for (const row of emptyRets) {
+      const brand = extractBrandFromName(row.product_name);
+      if (brand) { updateRets.run(brand, row.id); fixedReturns++; }
+    }
+  })();
+
+  if (fixedOrders + fixedReturns > 0)
+    console.log(`[brand-fix] orders=${fixedOrders} returns=${fixedReturns}`);
+  return { orders: fixedOrders, returns: fixedReturns };
+}
+
 function buildOrderRecord(row) {
   const pd = parseDate(row['Purchase Date2'] || row['purchase-date']);
   const rawBrand = String(row['Brand'] || '').trim();
@@ -353,6 +392,10 @@ async function processFileAsync(filePath, dataType, uploadedBy, filename, jobId)
       job.dupsRemoved = dupsRemoved;
     }
 
+    // Auto-fix blank brands from product name
+    const brandFix = runBrandFix();
+    job.brandFixed = brandFix.orders + brandFix.returns;
+
     const fHash = fileHash(filePath);
     db.prepare('INSERT OR IGNORE INTO upload_log (filename, file_hash, type, rows_added, rows_skipped, uploaded_by) VALUES (?,?,?,?,?,?)')
       .run(filename, fHash, dataType, ordersAdded + returnsAdded, ordersSkipped + returnsSkipped, uploadedBy);
@@ -412,11 +455,14 @@ app.post('/api/import-returns', (req, res) => {
   let added = 0, updated = 0, skipped = 0;
   db.transaction((rows) => {
     for (const rec of rows) {
+      // Auto-fill blank brand from product name before inserting
+      if (!rec.brand || rec.brand === '-' || rec.brand === '0') {
+        rec.brand = extractBrandFromName(rec.product_name || '') || rec.brand || '';
+      }
       const r = insertReturn.run(rec);
       if (r.changes > 0) {
         added++;
       } else {
-        // Row exists — update disposition if it was blank
         const u = updateReturnDisposition.run({ disposition: rec.disposition, row_hash: rec.row_hash });
         if (u.changes > 0) updated++; else skipped++;
       }
@@ -432,6 +478,10 @@ app.post('/api/import-orders', (req, res) => {
   let added = 0, skipped = 0;
   db.transaction((rows) => {
     for (const rec of rows) {
+      // Auto-fill blank brand from product name before inserting
+      if (!rec.brand || rec.brand === '-' || rec.brand === '0') {
+        rec.brand = extractBrandFromName(rec.product_name || '') || rec.brand || '';
+      }
       const r = insertOrder.run(rec);
       if (r.changes > 0) added++; else skipped++;
     }
