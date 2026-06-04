@@ -198,7 +198,8 @@ function processSheetBatched(filePath, sheetName, batchSize, batchCallback) {
 
     workbookReader.on('worksheet', worksheetReader => {
       if (worksheetReader.name !== sheetName) {
-        worksheetReader.destroy(); // skip other sheets
+        // Skip non-target sheets — just consume rows without processing
+        worksheetReader.on('row', () => {});
         return;
       }
       found = true;
