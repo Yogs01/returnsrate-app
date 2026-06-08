@@ -71,30 +71,47 @@ const insertReturn = db.prepare(`
    @gender, @brand, @customer_comments, @row_hash)
 `);
 
-// Known brands sorted longest-first to avoid partial prefix matches
+// One canonical spelling per brand — no duplicates.
+// All case variants (SOREL / sorel / Sorel) are normalised to this form via canonicalizeBrand().
 const KNOWN_BRANDS = [
-  'Good Smile Company','GOOD SMILE COMPANY','Teenage Mutant Ninja Turtles',
+  'Good Smile Company','Teenage Mutant Ninja Turtles',
   'Dungeons & Dragons','Under Armour','Diamond Select','Orange Rouge',
   'The Loyal Subjects','Max Factory','Square Enix','Games Workshop',
-  'Hiya Toys','Hot Toys','Sen-Ti-Nel','Sen-ti-nel','Warhammer 40k',
-  'Jason Markk','SAXX Underwear Co.','SAXX','Hey Dude','HEYDUDE',
+  'Hiya Toys','Hot Toys','Sen-Ti-Nel','Warhammer 40k',
+  'Jason Markk','SAXX Underwear Co.','SAXX','Hey Dude',
   'Fjallraven','Hydro Flask','Loungefly','CamelBak','ThreeZero',
-  'Mezco','Funko','FUNKO','Hasbro','Mattel','Bandai','Capcom','NECA',
+  'Mezco','Funko','Hasbro','Mattel','Bandai','Capcom','NECA',
   'Megahouse','Furyu','SEGA','Vionic','Timberland','Saucony','Rockport',
-  'Reebok','Merrell','MERRELL','GARMONT','Brooks','K-Swiss','ASICS',
-  'Clarks','Chaco','MARMOT','Kelty','ALTRA','OOFOS','Hestra','Sperry',
-  'DenTek','Sharpie','HOKA','Hoka','KEEN','ECCO','MUCK','Muck',
-  'Smith','SMITH','Cole Haan','adidas','Nike','Veja','Crocs',
+  'Reebok','Merrell','Garmont','Brooks','K-Swiss','ASICS',
+  'Clarks','Chaco','Marmot','Kelty','Altra','OOFOS','Hestra','Sperry',
+  'DenTek','Sharpie','HOKA','KEEN','ECCO','Muck',
+  'Smith','Cole Haan','adidas','Nike','Veja','Crocs',
   'Birkenstock','Salomon','Teva','UGG','Bogs','Sorel','Danner','Oboz',
   'New Balance','Puma','Osprey','Gregory','Deuter','Thule','Patagonia',
   'Columbia','Arc\'teryx','Cotopaxi','Eagle Creek','Warhammer',
-  'Keds','REEF','Caterpillar','CAT Footwear','On'
+  'Keds','REEF','Caterpillar','CAT Footwear','On',
+  'Blundstone','Vans','Converse','Skechers','Dr. Martens','Hunter',
+  'Baffin','Kamik','Muck Boot','Pendleton','Woolrich',
+  'Henley Hansen','Helly Hansen','The North Face','Black Diamond',
+  'Darn Tough','Smartwool','Wigwam','Thorlos','Bombas'
 ].sort((a, b) => b.length - a.length);
+
+// Returns the canonical KNOWN_BRANDS spelling for a brand (case-insensitive match).
+// E.g. "SOREL" → "Sorel", "hoka" → "HOKA", "merrell" → "Merrell".
+// Falls back to the original string trimmed if not in the list.
+function canonicalizeBrand(brand) {
+  if (!brand || brand === '-' || brand === '0') return brand;
+  const lower = brand.trim().toLowerCase();
+  for (const kb of KNOWN_BRANDS) {
+    if (kb.toLowerCase() === lower) return kb;
+  }
+  return brand.trim();
+}
 
 function extractBrandFromName(productName) {
   if (!productName || productName === '-') return null;
   const p = productName.trim();
-  // 1. Known brand as prefix
+  // 1. Known brand as prefix — always returns the canonical spelling
   for (const brand of KNOWN_BRANDS) {
     if (p.toLowerCase().startsWith(brand.toLowerCase())) return brand;
   }
@@ -118,18 +135,18 @@ function extractBrandFromName(productName) {
   return null;
 }
 
-// Auto-fill blank brands from product_name for both orders and returns tables.
+// Auto-fill blank brands AND canonicalize existing brand spellings.
 // Called after every upload or JSON import. Returns { orders, returns } counts fixed.
 function runBrandFix() {
   const updateOrders = db.prepare(`UPDATE orders  SET brand = ? WHERE id = ?`);
   const updateRets   = db.prepare(`UPDATE returns SET brand = ? WHERE id = ?`);
 
+  // Pass 1: fill in blank brands from product_name
   const emptyOrders = db.prepare(`
     SELECT id, product_name FROM orders
     WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0')
       AND product_name IS NOT NULL AND product_name != ''
   `).all();
-
   let fixedOrders = 0;
   db.transaction(() => {
     for (const row of emptyOrders) {
@@ -143,12 +160,29 @@ function runBrandFix() {
     WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0')
       AND product_name IS NOT NULL AND product_name != ''
   `).all();
-
   let fixedReturns = 0;
   db.transaction(() => {
     for (const row of emptyRets) {
       const brand = extractBrandFromName(row.product_name);
       if (brand) { updateRets.run(brand, row.id); fixedReturns++; }
+    }
+  })();
+
+  // Pass 2: canonicalize existing non-blank brands (e.g. "SOREL" → "Sorel", "HOKA" → "HOKA")
+  // This removes duplicates caused by case mismatches between raw file data and brand detector.
+  const allOrders = db.prepare(`SELECT id, brand FROM orders WHERE brand IS NOT NULL AND brand != '' AND brand != '-' AND brand != '0'`).all();
+  db.transaction(() => {
+    for (const row of allOrders) {
+      const canonical = canonicalizeBrand(row.brand);
+      if (canonical !== row.brand) { updateOrders.run(canonical, row.id); fixedOrders++; }
+    }
+  })();
+
+  const allRets = db.prepare(`SELECT id, brand FROM returns WHERE brand IS NOT NULL AND brand != '' AND brand != '-' AND brand != '0'`).all();
+  db.transaction(() => {
+    for (const row of allRets) {
+      const canonical = canonicalizeBrand(row.brand);
+      if (canonical !== row.brand) { updateRets.run(canonical, row.id); fixedReturns++; }
     }
   })();
 
@@ -161,9 +195,11 @@ function buildOrderRecord(row) {
   const pd = parseDate(row['Purchase Date2'] || row['purchase-date']);
   const rawBrand = String(row['Brand'] || '').trim();
   const productName = String(row['product-name'] || '').trim();
-  const brand = (rawBrand && rawBrand !== '-' && rawBrand !== '0')
-    ? rawBrand
-    : (extractBrandFromName(productName) || rawBrand);
+  const brand = canonicalizeBrand(
+    (rawBrand && rawBrand !== '-' && rawBrand !== '0')
+      ? rawBrand
+      : (extractBrandFromName(productName) || rawBrand)
+  );
   return {
     identifier: String(row['Identifier'] || row['Duplicate Id'] || '').trim(),
     purchase_month: String(row['Purchase Month'] || '').trim(),
@@ -208,7 +244,7 @@ function buildReturnRecord(row) {
     reason,
     status:             String(row['Status'] || row['status'] || '').trim(),
     gender:             String(row['Gender'] || row['gender'] || '').trim(),
-    brand:              String(row['Brand']  || row['brand']  || '').trim(),
+    brand:              canonicalizeBrand(String(row['Brand'] || row['brand'] || '').trim()),
     customer_comments:  String(row['Customer-comments'] || row['customer-comments'] || '').trim(),
     row_hash:           hash(String(row['Order ID'] || row['order-id'] || '').trim(), String(row['ASIN'] || row['asin'] || '').trim(), rd || '', reason),
   };
@@ -1109,6 +1145,20 @@ app.delete('/api/returns/dedup', (req, res) => {
   const after = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
   console.log(`dedup returns: removed ${before - after} duplicate rows, ${after} remain`);
   res.json({ deleted: before - after, remaining: after });
+});
+
+// GET /api/normalize-brands — one-time backfill: canonicalizes all brand spellings in the DB
+// (e.g. "SOREL" → "Sorel", "HOKA" → "HOKA", "merrell" → "Merrell")
+// Safe to run multiple times — only updates rows where the value actually changes.
+app.get('/api/normalize-brands', (req, res) => {
+  try {
+    const result = runBrandFix();
+    console.log(`normalize-brands: orders_fixed=${result.orders} returns_fixed=${result.returns}`);
+    res.json({ success: true, orders_fixed: result.orders, returns_fixed: result.returns });
+  } catch(e) {
+    console.error('normalize-brands error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/fix-brands — one-time migration: fills in brand for orders where brand is blank/dash/0
