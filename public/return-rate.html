@@ -113,6 +113,13 @@
       <!-- Filters -->
       <div class="card-body" style="padding-bottom:0">
         <div class="filters">
+          <select id="timelineFilter" onchange="load(1)">
+            <option value="">All Time</option>
+            <option value="3m">Past 3 Months</option>
+            <option value="12m">Past 12 Months</option>
+            <option value="2y">Past 2 Years</option>
+            <option value="3y">Past 3 Years</option>
+          </select>
           <select id="monthFilter" onchange="load(1)">
             <option value="">All Months</option>
           </select>
@@ -245,17 +252,31 @@ function toggleSort(col) {
 function debounce() { clearTimeout(debTimer); debTimer = setTimeout(() => load(1), 350); }
 
 function clearFilters() {
-  document.getElementById('monthFilter').value    = '';
-  document.getElementById('weekFilter').value     = '';
-  document.getElementById('brandFilter').value    = '';
-  document.getElementById('styleSearch').value    = '';
+  document.getElementById('timelineFilter').value  = '';
+  document.getElementById('monthFilter').value     = '';
+  document.getElementById('weekFilter').value      = '';
+  document.getElementById('brandFilter').value     = '';
+  document.getElementById('styleSearch').value     = '';
   document.getElementById('minOrdersFilter').value = '10';
   load(1);
+}
+
+// Convert a timeline shortcode to a YYYY-MM-DD cutoff date (today minus N months/years)
+function timelineSince(code) {
+  if (!code) return '';
+  const d = new Date();
+  if      (code === '3m')  d.setMonth(d.getMonth() - 3);
+  else if (code === '12m') d.setFullYear(d.getFullYear() - 1);
+  else if (code === '2y')  d.setFullYear(d.getFullYear() - 2);
+  else if (code === '3y')  d.setFullYear(d.getFullYear() - 3);
+  return d.toISOString().split('T')[0]; // YYYY-MM-DD
 }
 
 async function load(page) {
   currentPage = page || currentPage;
 
+  const timelineRaw = document.getElementById('timelineFilter').value;
+  const since     = timelineSince(timelineRaw);
   const month     = document.getElementById('monthFilter').value;
   const weekRaw   = document.getElementById('weekFilter').value;
   const brand     = document.getElementById('brandFilter').value;
@@ -269,7 +290,7 @@ async function load(page) {
 
   const qs = new URLSearchParams({
     groupBy: currentView, sort: currentSort, page: currentPage,
-    month, week, year, brand, style, minOrders
+    since, month, week, year, brand, style, minOrders
   });
 
   document.getElementById('tableBody').innerHTML =
@@ -302,10 +323,12 @@ function renderStats(d) {
 
 function updateTopbar(d) {
   const filters = [];
-  const m = document.getElementById('monthFilter').value;
-  const w = document.getElementById('weekFilter').selectedOptions[0]?.text;
-  const b = document.getElementById('brandFilter').value;
-  const s = document.getElementById('styleSearch').value;
+  const tl = document.getElementById('timelineFilter');
+  const m  = document.getElementById('monthFilter').value;
+  const w  = document.getElementById('weekFilter').selectedOptions[0]?.text;
+  const b  = document.getElementById('brandFilter').value;
+  const s  = document.getElementById('styleSearch').value;
+  if (tl.value) filters.push(tl.selectedOptions[0].text);
   if (m) filters.push(m);
   if (w && w !== 'All Weeks') filters.push(w);
   if (b) filters.push(b);

@@ -673,9 +673,10 @@ app.get('/api/filters', (req, res) => {
   }
 });
 
-// GET /api/return-rate?groupBy=sku|style|brand&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders
+// GET /api/return-rate?groupBy=sku|style|brand&since=YYYY-MM-DD&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders
 app.get('/api/return-rate', (req, res) => {
   const groupBy  = ['sku', 'style', 'brand'].includes(req.query.groupBy) ? req.query.groupBy : 'sku';
+  const since    = req.query.since  || '';   // YYYY-MM-DD cutoff (Past 3M / 12M / 2Y / 3Y)
   const month    = req.query.month  || '';
   const week     = req.query.week   ? parseInt(req.query.week)  : null;
   const year     = req.query.year   ? String(req.query.year)    : '';
@@ -696,6 +697,7 @@ app.get('/api/return-rate', (req, res) => {
     const p = prefix ? `${prefix}.` : '';
     const clauses = [`${p}order_status != 'On Trial'`, `${p}${groupCol} != ''`];
     const vals = [];
+    if (since) { clauses.push(`${p}purchase_date >= ?`);                   vals.push(since); }
     if (month) { clauses.push(`strftime('%Y-%m', ${p}purchase_date) = ?`); vals.push(month); }
     if (week)  { clauses.push(`${p}purchase_week = ?`);                    vals.push(week);  }
     if (year)  { clauses.push(`strftime('%Y', ${p}purchase_date) = ?`);    vals.push(year);  }
@@ -760,6 +762,7 @@ app.get('/api/return-rate', (req, res) => {
     const buildStatsFilters = () => {
       const clauses = [`order_status != 'On Trial'`];
       const vals = [];
+      if (since) { clauses.push(`purchase_date >= ?`);                   vals.push(since); }
       if (month) { clauses.push(`strftime('%Y-%m', purchase_date) = ?`); vals.push(month); }
       if (week)  { clauses.push(`purchase_week = ?`);                    vals.push(week);  }
       if (year)  { clauses.push(`strftime('%Y', purchase_date) = ?`);    vals.push(year);  }
@@ -775,18 +778,19 @@ app.get('/api/return-rate', (req, res) => {
 
     // Returns: count returns whose source order matches all active filters (via EXISTS join).
     let totalReturns;
-    if (!month && !week && !year && !brand && !style) {
+    if (!since && !month && !week && !year && !brand && !style) {
       // No filters — just count everything (matches dashboard exactly)
       totalReturns = db.prepare(`SELECT COALESCE(SUM(quantity), 0) as n FROM returns`).get()?.n || 0;
     } else {
       // Filtered — count returns linked to orders that match all active filters via EXISTS
       const exClauses = [`o.amazon_order_id = r.order_id`, `o.order_status != 'On Trial'`];
       const exParams  = [];
-      if (month) { exClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`); exParams.push(month); }
-      if (week)  { exClauses.push(`o.purchase_week = ?`);                    exParams.push(week);  }
-      if (year)  { exClauses.push(`strftime('%Y', o.purchase_date) = ?`);    exParams.push(year);  }
-      if (brand) { exClauses.push(`o.brand = ?`);                            exParams.push(brand); }
-      if (style) { exClauses.push(`o.product_name LIKE ?`);                  exParams.push(`%${style}%`); }
+      if (since) { exClauses.push(`o.purchase_date >= ?`);                    exParams.push(since); }
+      if (month) { exClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`);  exParams.push(month); }
+      if (week)  { exClauses.push(`o.purchase_week = ?`);                     exParams.push(week);  }
+      if (year)  { exClauses.push(`strftime('%Y', o.purchase_date) = ?`);     exParams.push(year);  }
+      if (brand) { exClauses.push(`o.brand = ?`);                             exParams.push(brand); }
+      if (style) { exClauses.push(`o.product_name LIKE ?`);                   exParams.push(`%${style}%`); }
       totalReturns = db.prepare(
         `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r
          WHERE EXISTS (SELECT 1 FROM orders o WHERE ${exClauses.join(' AND ')})`
