@@ -811,6 +811,110 @@ app.get('/api/return-rate', (req, res) => {
   }
 });
 
+// GET /api/brand-detail — drill-down analysis for a single brand / sku / style
+// Returns return reasons, disposition breakdown, and top SKUs for the selected dimension.
+// Respects the same since/month/week/year time filters as /api/return-rate.
+app.get('/api/brand-detail', (req, res) => {
+  const brand = req.query.brand || '';
+  const sku   = req.query.sku   || '';
+  const style = req.query.style || '';
+  const since = req.query.since || '';
+  const month = req.query.month || '';
+  const week  = req.query.week  ? parseInt(req.query.week) : null;
+  const year  = req.query.year  ? String(req.query.year)   : '';
+
+  // Build WHERE clauses with optional table alias prefix
+  const buildWhere = (prefix = '') => {
+    const p = prefix ? `${prefix}.` : '';
+    const clauses = [`${p}order_status != 'On Trial'`];
+    const vals = [];
+    if (brand) { clauses.push(`${p}brand = ?`);                              vals.push(brand); }
+    if (sku)   { clauses.push(`${p}sku = ?`);                                vals.push(sku);   }
+    if (style) { clauses.push(`${p}product_name = ?`);                       vals.push(style); }
+    if (since) { clauses.push(`${p}purchase_date >= ?`);                     vals.push(since); }
+    if (month) { clauses.push(`strftime('%Y-%m', ${p}purchase_date) = ?`);   vals.push(month); }
+    if (week)  { clauses.push(`${p}purchase_week = ?`);                      vals.push(week);  }
+    if (year)  { clauses.push(`strftime('%Y', ${p}purchase_date) = ?`);      vals.push(year);  }
+    return { sql: clauses.join(' AND '), params: vals };
+  };
+
+  const dF = buildWhere();    // no prefix — direct FROM orders WHERE ...
+  const oF = buildWhere('o'); // 'o' prefix — inside JOINs where orders is aliased as o
+
+  try {
+    // Total orders for this dimension (no join needed)
+    const ordersQty = db.prepare(`SELECT COALESCE(SUM(quantity), 0) as n FROM orders WHERE ${dF.sql}`)
+      .get(...dF.params)?.n || 0;
+
+    // Total returns linked to those orders
+    const returnsQty = db.prepare(`
+      SELECT COALESCE(SUM(r.quantity), 0) as n
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id
+      WHERE ${oF.sql}
+    `).get(...oF.params)?.n || 0;
+
+    // Return reasons breakdown
+    const reasons = db.prepare(`
+      SELECT r.reason, SUM(r.quantity) as qty
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id
+      WHERE ${oF.sql} AND r.reason != ''
+      GROUP BY r.reason ORDER BY qty DESC LIMIT 20
+    `).all(...oF.params);
+
+    // Disposition breakdown
+    const dispositions = db.prepare(`
+      SELECT r.disposition, SUM(r.quantity) as qty
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id
+      WHERE ${oF.sql} AND r.disposition != ''
+      GROUP BY r.disposition ORDER BY qty DESC
+    `).all(...oF.params);
+
+    // Top returned SKUs — separate subqueries to avoid JOIN-inflation bug
+    // (a single order with N return rows would multiply its quantity N times in a plain JOIN)
+    const topItems = db.prepare(`
+      SELECT
+        oa.sku, oa.product_name, oa.orders_qty,
+        COALESCE(ra.returns_qty, 0)                                                  AS returns_qty,
+        ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)    AS return_rate
+      FROM (
+        SELECT sku, MAX(product_name) AS product_name, SUM(quantity) AS orders_qty
+        FROM orders WHERE ${dF.sql}
+        GROUP BY sku HAVING orders_qty >= 3
+      ) oa
+      LEFT JOIN (
+        SELECT o.sku, SUM(r.quantity) AS returns_qty
+        FROM returns r
+        JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+        WHERE ${oF.sql}
+        GROUP BY o.sku
+      ) ra ON ra.sku = oa.sku
+      ORDER BY return_rate DESC, returns_qty DESC
+      LIMIT 10
+    `).all(...dF.params, ...oF.params);
+
+    // Attach percentage to each reason / disposition
+    const totalR = reasons.reduce((s, r) => s + r.qty, 0);
+    const totalD = dispositions.reduce((s, r) => s + r.qty, 0);
+    reasons.forEach(r => { r.pct = totalR > 0 ? +(r.qty / totalR * 100).toFixed(1) : 0; });
+    dispositions.forEach(r => { r.pct = totalD > 0 ? +(r.qty / totalD * 100).toFixed(1) : 0; });
+
+    const returnRate = ordersQty > 0 ? (returnsQty / ordersQty * 100).toFixed(1) : null;
+
+    res.json({
+      summary: { orders_qty: ordersQty, returns_qty: returnsQty, return_rate: returnRate },
+      reasons,
+      dispositions,
+      topItems
+    });
+  } catch(e) {
+    console.error('brand-detail error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/uploads
 app.get('/api/uploads', (req, res) => {
   const logs = db.prepare('SELECT * FROM upload_log ORDER BY uploaded_at DESC LIMIT 50').all();

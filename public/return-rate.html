@@ -172,6 +172,30 @@
   </div>
 </div>
 
+<!-- ── Detail Analysis Modal ──────────────────────────────────────────── -->
+<div id="detailModal" onclick="if(event.target===this)closeModal()"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;overflow-y:auto;padding:32px 16px">
+  <div style="background:#fff;border-radius:14px;max-width:780px;margin:0 auto;box-shadow:0 24px 64px rgba(0,0,0,.28)">
+
+    <!-- Header -->
+    <div style="padding:24px 28px 0;display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+      <div>
+        <div id="modalSubtitle" style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Brand Analysis</div>
+        <h2 id="modalTitle" style="margin:4px 0 0;font-size:21px;font-weight:700">—</h2>
+      </div>
+      <button onclick="closeModal()" style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:var(--text-muted);flex-shrink:0">×</button>
+    </div>
+
+    <!-- Stat chips -->
+    <div id="modalStats" style="padding:16px 28px 0;display:grid;grid-template-columns:repeat(3,1fr);gap:10px"></div>
+
+    <!-- Body -->
+    <div id="modalContent" style="padding:20px 28px 28px">
+      <div style="text-align:center;padding:40px"><span class="spinner"></span></div>
+    </div>
+  </div>
+</div>
+
 <script>
 let currentView = 'sku';
 let currentSort = 'rate';
@@ -359,14 +383,22 @@ function renderTable(d) {
     const barWidth = Math.min(rate || 0, 100);
     const barColor = rate >= 25 ? '#e53e3e' : rate >= 15 ? '#dd6b20' : rate >= 5 ? '#d69e2e' : '#38a169';
 
+    const analyzeBtn = `<button
+      onclick="openDetail(${JSON.stringify(r.name)}, '${currentView}')"
+      title="View return analysis"
+      style="margin-left:6px;background:none;border:1px solid var(--border);border-radius:5px;
+             padding:1px 6px;font-size:11px;cursor:pointer;color:var(--brand);vertical-align:middle">
+      📊
+    </button>`;
+
     const nameCell = isBySKU
       ? `<td>
-           <div style="font-weight:600;font-size:13px">${esc(r.name)}</div>
+           <div style="font-weight:600;font-size:13px">${esc(r.name)}${analyzeBtn}</div>
            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(r.sample_name||'')}</div>
          </td>`
       : isByBrand
-      ? `<td><strong>${esc(r.name)}</strong></td>`
-      : `<td style="max-width:300px;font-weight:500">${esc(r.name)}</td>`;
+      ? `<td><strong>${esc(r.name)}</strong>${analyzeBtn}</td>`
+      : `<td style="max-width:300px;font-weight:500">${esc(r.name)}${analyzeBtn}</td>`;
 
     const brandCell = isByBrand ? '' : `<td style="color:var(--text-muted)">${esc(r.sample_brand||'—')}</td>`;
 
@@ -441,6 +473,129 @@ function exportCSV() {
   a.href = URL.createObjectURL(blob);
   a.download = `return-rate-by-${currentView}.csv`;
   a.click();
+}
+
+// ── Detail Modal ─────────────────────────────────────────────────────────
+function openModal()  { document.getElementById('detailModal').style.display = 'block'; document.body.style.overflow = 'hidden'; }
+function closeModal() { document.getElementById('detailModal').style.display = 'none';  document.body.style.overflow = '';       }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+async function openDetail(name, type) {
+  const since   = timelineSince(document.getElementById('timelineFilter').value);
+  const month   = document.getElementById('monthFilter').value;
+  const weekRaw = document.getElementById('weekFilter').value;
+  let week = '', year = '';
+  if (weekRaw) { try { const w = JSON.parse(weekRaw); week = w.week; year = w.year; } catch(_) {} }
+
+  const typeLabel = type === 'brand' ? 'Brand Analysis' : type === 'sku' ? 'SKU Analysis' : 'Style Analysis';
+  document.getElementById('modalSubtitle').textContent = typeLabel;
+  document.getElementById('modalTitle').textContent    = name;
+  document.getElementById('modalStats').innerHTML      = '';
+  document.getElementById('modalContent').innerHTML    = '<div style="text-align:center;padding:40px"><span class="spinner"></span></div>';
+  openModal();
+
+  try {
+    const qs = new URLSearchParams({ since, month, week, year });
+    qs.set(type, name);
+    const d = await fetch(`/api/brand-detail?${qs}`).then(r => r.json());
+    if (d.error) { document.getElementById('modalContent').innerHTML = `<div class="alert alert-error">${esc(d.error)}</div>`; return; }
+    renderModalDetail(name, type, d);
+  } catch(e) {
+    document.getElementById('modalContent').innerHTML = `<div class="alert alert-error">${esc(e.message)}</div>`;
+  }
+}
+
+function renderModalDetail(name, type, d) {
+  const { summary, reasons, dispositions, topItems } = d;
+  const rate = summary.return_rate != null ? parseFloat(summary.return_rate) : null;
+  const rateColor = rate >= 25 ? '#e53e3e' : rate >= 15 ? '#dd6b20' : rate >= 5 ? '#d69e2e' : '#38a169';
+
+  // Stat chips
+  document.getElementById('modalStats').innerHTML = `
+    <div style="background:var(--bg);border-radius:8px;padding:14px 16px">
+      <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em">Return Rate</div>
+      <div style="font-size:28px;font-weight:800;color:${rateColor}">${rate != null ? rate.toFixed(1)+'%' : '—'}</div>
+    </div>
+    <div style="background:var(--bg);border-radius:8px;padding:14px 16px">
+      <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em">Orders</div>
+      <div style="font-size:28px;font-weight:800">${n(summary.orders_qty)}</div>
+    </div>
+    <div style="background:var(--bg);border-radius:8px;padding:14px 16px">
+      <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em">Returns</div>
+      <div style="font-size:28px;font-weight:800">${n(summary.returns_qty)}</div>
+    </div>`;
+
+  let html = '';
+
+  // ── Return Reasons ──
+  html += `<div style="margin-bottom:24px">
+    <h3 style="font-size:14px;font-weight:700;margin:0 0 14px;border-bottom:1px solid var(--border);padding-bottom:8px">
+      Return Reasons ${reasons.length ? `<span style="font-weight:400;color:var(--text-muted);font-size:12px">(${n(reasons.reduce((s,r)=>s+r.qty,0))} units)</span>` : ''}
+    </h3>`;
+  if (reasons.length) {
+    const maxQty = reasons[0].qty;
+    reasons.forEach(r => {
+      const barW = maxQty > 0 ? (r.qty / maxQty * 100) : 0;
+      html += `<div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span style="font-weight:500">${esc(r.reason)}</span>
+          <span style="color:var(--text-muted)">${n(r.qty)} <span style="font-size:11px">(${r.pct}%)</span></span>
+        </div>
+        <div style="height:7px;background:var(--border);border-radius:4px">
+          <div style="width:${barW}%;height:100%;background:var(--brand);border-radius:4px;transition:width .3s"></div>
+        </div>
+      </div>`;
+    });
+  } else {
+    html += `<p style="color:var(--text-muted);font-size:13px;margin:0">No return reason data found.</p>`;
+  }
+  html += `</div>`;
+
+  // ── Disposition Breakdown ──
+  if (dispositions.length) {
+    html += `<div style="margin-bottom:24px">
+      <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;border-bottom:1px solid var(--border);padding-bottom:8px">Disposition Breakdown</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">`;
+    dispositions.forEach(r => {
+      const sell = r.disposition === 'SELLABLE';
+      html += `<div style="background:${sell?'#d4edda':'#fde8d8'};color:${sell?'#155724':'#823300'};
+                border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700">
+        ${esc(r.disposition)}: ${n(r.qty)} <span style="font-weight:400">(${r.pct}%)</span>
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
+
+  // ── Top Returned SKUs (brand / style drill-down) ──
+  if (topItems.length && type !== 'sku') {
+    html += `<div>
+      <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;border-bottom:1px solid var(--border);padding-bottom:8px">Top Returned SKUs</h3>
+      <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="border-bottom:2px solid var(--border)">
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">#</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">SKU / Product</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Orders</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Returns</th>
+          <th style="text-align:right;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Rate</th>
+        </tr></thead>
+        <tbody>`;
+    topItems.forEach((item, i) => {
+      html += `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;color:var(--text-muted)">${i+1}</td>
+        <td style="padding:8px">
+          <div style="font-weight:600">${esc(item.sku)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:1px">${esc(item.product_name||'')}</div>
+        </td>
+        <td style="padding:8px;text-align:right">${n(item.orders_qty)}</td>
+        <td style="padding:8px;text-align:right">${n(item.returns_qty)}</td>
+        <td style="padding:8px;text-align:right">${rateBadge(item.return_rate)}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+  }
+
+  document.getElementById('modalContent').innerHTML = html;
 }
 
 // Init
