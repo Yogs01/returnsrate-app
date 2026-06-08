@@ -699,7 +699,7 @@ app.get('/api/return-rate', (req, res) => {
     if (month) { clauses.push(`strftime('%Y-%m', ${p}purchase_date) = ?`); vals.push(month); }
     if (week)  { clauses.push(`${p}purchase_week = ?`);                    vals.push(week);  }
     if (year)  { clauses.push(`strftime('%Y', ${p}purchase_date) = ?`);    vals.push(year);  }
-    if (brand && groupBy !== 'brand') { clauses.push(`${p}brand = ?`);     vals.push(brand); }
+    if (brand) { clauses.push(`${p}brand = ?`);                            vals.push(brand); }
     if (style && groupBy !== 'style') { clauses.push(`${p}product_name LIKE ?`); vals.push(`%${style}%`); }
     return { sql: clauses.join(' AND '), params: vals };
   };
@@ -752,27 +752,41 @@ app.get('/api/return-rate', (req, res) => {
     const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...allParams, limit, offset);
     const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...allParams);
 
-    // Weighted overall rate — match dashboard exactly
-    // Orders: direct sum (no join)
-    // Returns: use EXISTS so each return is counted once regardless of SKU format differences
-    const totalOrders = db.prepare(
-      `SELECT SUM(quantity) as n FROM orders WHERE ${oF.sql}`
-    ).get(...oF.params)?.n || 0;
+    // Stat-card totals: apply all active filters but WITHOUT the `${groupCol} != ''`
+    // constraint used in the grouped table. That constraint changes per view (sku/product_name/brand),
+    // so including it makes the overall rate fluctuate when you switch between By SKU / By Style /
+    // By Brand — whichever column has the most blank values lowers the denominator and inflates the
+    // rate. The totals should always reflect the same universe of orders regardless of grouping.
+    const buildStatsFilters = () => {
+      const clauses = [`order_status != 'On Trial'`];
+      const vals = [];
+      if (month) { clauses.push(`strftime('%Y-%m', purchase_date) = ?`); vals.push(month); }
+      if (week)  { clauses.push(`purchase_week = ?`);                    vals.push(week);  }
+      if (year)  { clauses.push(`strftime('%Y', purchase_date) = ?`);    vals.push(year);  }
+      if (brand) { clauses.push(`brand = ?`);                            vals.push(brand); }
+      if (style) { clauses.push(`product_name LIKE ?`);                  vals.push(`%${style}%`); }
+      return { sql: clauses.join(' AND '), params: vals };
+    };
+    const sF = buildStatsFilters();
 
-    // Returns: query directly from returns table (no join) so it matches the dashboard total.
-    // When filters are active, filter by return_month / return_date to scope correctly.
+    const totalOrders = db.prepare(
+      `SELECT SUM(quantity) as n FROM orders WHERE ${sF.sql}`
+    ).get(...sF.params)?.n || 0;
+
+    // Returns: count returns whose source order matches all active filters (via EXISTS join).
     let totalReturns;
     if (!month && !week && !year && !brand && !style) {
       // No filters — just count everything (matches dashboard exactly)
       totalReturns = db.prepare(`SELECT COALESCE(SUM(quantity), 0) as n FROM returns`).get()?.n || 0;
     } else {
-      // Filtered — count returns linked to orders that match the filter via EXISTS
+      // Filtered — count returns linked to orders that match all active filters via EXISTS
       const exClauses = [`o.amazon_order_id = r.order_id`, `o.order_status != 'On Trial'`];
       const exParams  = [];
       if (month) { exClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`); exParams.push(month); }
       if (week)  { exClauses.push(`o.purchase_week = ?`);                    exParams.push(week);  }
       if (year)  { exClauses.push(`strftime('%Y', o.purchase_date) = ?`);    exParams.push(year);  }
-      if (brand && groupBy !== 'brand') { exClauses.push(`o.brand = ?`);     exParams.push(brand); }
+      if (brand) { exClauses.push(`o.brand = ?`);                            exParams.push(brand); }
+      if (style) { exClauses.push(`o.product_name LIKE ?`);                  exParams.push(`%${style}%`); }
       totalReturns = db.prepare(
         `SELECT COALESCE(SUM(r.quantity), 0) as n FROM returns r
          WHERE EXISTS (SELECT 1 FROM orders o WHERE ${exClauses.join(' AND ')})`
