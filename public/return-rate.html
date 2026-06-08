@@ -383,8 +383,9 @@ function renderTable(d) {
     const barWidth = Math.min(rate || 0, 100);
     const barColor = rate >= 25 ? '#e53e3e' : rate >= 15 ? '#dd6b20' : rate >= 5 ? '#d69e2e' : '#38a169';
 
+    const safeName = String(r.name||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const analyzeBtn = `<button
-      onclick="openDetail(${JSON.stringify(r.name)}, '${currentView}')"
+      onclick="openDetail('${safeName}', '${currentView}')"
       title="View return analysis"
       style="margin-left:6px;background:none;border:1px solid var(--border);border-radius:5px;
              padding:1px 6px;font-size:11px;cursor:pointer;color:var(--brand);vertical-align:middle">
