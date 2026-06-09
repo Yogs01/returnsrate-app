@@ -49,6 +49,24 @@
     .mini-bar-wrap { display:flex; align-items:center; gap:8px; min-width:100px; }
     .mini-bar-track { flex:1; height:6px; background:var(--border); border-radius:3px; }
     .mini-bar-fill  { height:100%; border-radius:3px; }
+
+    /* Smooth loading — fade table instead of replacing with spinner */
+    .table-wrap { transition: opacity 0.15s ease; }
+    .table-wrap.is-loading { opacity: 0.35; pointer-events: none; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+    .table-wrap.did-load tbody { animation: fadeIn 0.18s ease; }
+
+    /* Subtle loading indicator in card header */
+    #loadingBar {
+      position:absolute; top:0; left:0; right:0; height:2px;
+      background: linear-gradient(90deg, var(--brand) 0%, #a78bfa 50%, var(--brand) 100%);
+      background-size: 200% 100%;
+      animation: shimmer 1s linear infinite;
+      border-radius: 8px 8px 0 0;
+      display: none;
+    }
+    @keyframes shimmer { 0%{background-position:100% 0} 100%{background-position:-100% 0} }
+    .card { position: relative; }
   </style>
 </head>
 <body>
@@ -101,6 +119,7 @@
 
     <!-- Main table card -->
     <div class="card">
+      <div id="loadingBar"></div>
       <div class="card-header">
         <div class="view-toggle">
           <button class="toggle-btn active" data-view="sku"   onclick="setView('sku',this)">By SKU</button>
@@ -203,6 +222,18 @@ let currentPage = 1;
 let debTimer;
 let allFilters = {};
 let lastData = { records: [], total: 0 };
+
+// Client-side response cache — avoids re-fetching the same query within 45 seconds
+const _apiCache = new Map();
+const API_CACHE_TTL = 45000;
+async function fetchCached(url) {
+  const hit = _apiCache.get(url);
+  if (hit && Date.now() - hit.ts < API_CACHE_TTL) return hit.data;
+  const data = await fetch(url).then(r => r.json());
+  _apiCache.set(url, { data, ts: Date.now() });
+  return data;
+}
+function clearApiCache() { _apiCache.clear(); }
 
 const n   = v => (v == null ? '—' : Number(v).toLocaleString());
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -317,19 +348,28 @@ async function load(page) {
     since, month, week, year, brand, style, minOrders
   });
 
-  document.getElementById('tableBody').innerHTML =
-    `<tr><td colspan="7" class="text-center" style="padding:40px"><span class="spinner"></span></td></tr>`;
+  // Fade the existing table instead of replacing with a spinner — much smoother
+  const tableWrap = document.querySelector('.table-wrap');
+  const loadingBar = document.getElementById('loadingBar');
+  tableWrap.classList.add('is-loading');
+  tableWrap.classList.remove('did-load');
+  loadingBar.style.display = 'block';
 
   try {
-    const d = await fetch(`/api/return-rate?${qs}`).then(r => r.json());
+    const d = await fetchCached(`/api/return-rate?${qs}`);
     if (d.error) { showError(d.error); return; }
     lastData = d;
     renderTable(d);
     renderStats(d);
     renderPagination(d);
     updateTopbar(d);
+    tableWrap.classList.remove('is-loading');
+    tableWrap.classList.add('did-load');
   } catch(e) {
     showError(e.message);
+    tableWrap.classList.remove('is-loading');
+  } finally {
+    loadingBar.style.display = 'none';
   }
 }
 
@@ -498,7 +538,7 @@ async function openDetail(name, type) {
   try {
     const qs = new URLSearchParams({ since, month, week, year });
     qs.set(type, name);
-    const d = await fetch(`/api/brand-detail?${qs}`).then(r => r.json());
+    const d = await fetchCached(`/api/brand-detail?${qs}`);
     if (d.error) { document.getElementById('modalContent').innerHTML = `<div class="alert alert-error">${esc(d.error)}</div>`; return; }
     renderModalDetail(name, type, d);
   } catch(e) {

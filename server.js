@@ -4,13 +4,45 @@ const XLSX = require('xlsx');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const zlib = require('zlib');
 const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// ─── Gzip compression for all JSON responses ─────────────────────────────────
+app.use((req, res, next) => {
+  const ae = req.headers['accept-encoding'] || '';
+  if (!ae.includes('gzip')) return next();
+  const _json = res.json.bind(res);
+  res.json = (data) => {
+    const buf = Buffer.from(JSON.stringify(data));
+    zlib.gzip(buf, (err, compressed) => {
+      if (err) return _json(data);
+      res.set({ 'Content-Encoding': 'gzip', 'Content-Type': 'application/json', 'Vary': 'Accept-Encoding' });
+      res.send(compressed);
+    });
+  };
+  next();
+});
+
+// ─── Cache-Control for static assets ─────────────────────────────────────────
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) res.set('Cache-Control', 'no-cache');
+    else res.set('Cache-Control', 'public, max-age=86400'); // 1 day for CSS/JS
+  }
+}));
+
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── Server-side filter cache (invalidated on every upload) ──────────────────
+// /api/filters is expensive (5 DISTINCT queries across 300K rows) but only
+// changes when new data is uploaded. Cache it for up to 5 minutes.
+let _filtersCache = null;
+let _filtersCacheTs = 0;
+const FILTERS_TTL = 5 * 60 * 1000; // 5 minutes
+function invalidateFiltersCache() { _filtersCache = null; _filtersCacheTs = 0; }
 
 // Increase timeout to 10 minutes for large file uploads
 const upload = multer({
@@ -436,6 +468,7 @@ async function processFileAsync(filePath, dataType, uploadedBy, filename, jobId)
     db.prepare('INSERT OR IGNORE INTO upload_log (filename, file_hash, type, rows_added, rows_skipped, uploaded_by) VALUES (?,?,?,?,?,?)')
       .run(filename, fHash, dataType, ordersAdded + returnsAdded, ordersSkipped + returnsSkipped, uploadedBy);
 
+    invalidateFiltersCache(); // new data means filters may have changed
     job.status = 'done';
     job.ordersAdded = ordersAdded; job.ordersSkipped = ordersSkipped;
     job.returnsAdded = returnsAdded; job.returnsSkipped = returnsSkipped;
@@ -684,9 +717,12 @@ app.get('/api/returns', (req, res) => {
   res.json({ records, total, page, pages: Math.ceil(total / limit) });
 });
 
-// GET /api/filters
+// GET /api/filters — results cached for 5 min (invalidated on upload)
 app.get('/api/filters', (req, res) => {
   try {
+    if (_filtersCache && Date.now() - _filtersCacheTs < FILTERS_TTL) {
+      return res.json(_filtersCache);
+    }
     const reasons = db.prepare(`SELECT DISTINCT reason FROM returns WHERE reason != '' ORDER BY reason`).all().map(r => r.reason);
     const brands = db.prepare(`SELECT DISTINCT brand FROM orders WHERE brand != '' AND brand != '-' AND brand != '0' ORDER BY brand`).all().map(r => r.brand);
     const months = db.prepare(`SELECT DISTINCT return_month FROM returns WHERE return_month != '' ORDER BY return_month DESC`).all().map(r => r.return_month);
@@ -702,7 +738,9 @@ app.get('/api/filters', (req, res) => {
       FROM orders WHERE purchase_date != '' AND purchase_week IS NOT NULL
       GROUP BY year, week ORDER BY year DESC, week DESC LIMIT 156
     `).all();
-    res.json({ reasons, brands, months, dispositions, orderMonths, weeks });
+    _filtersCache = { reasons, brands, months, dispositions, orderMonths, weeks };
+    _filtersCacheTs = Date.now();
+    res.json(_filtersCache);
   } catch(e) {
     console.error('filters error:', e.message);
     res.status(500).json({ error: e.message });

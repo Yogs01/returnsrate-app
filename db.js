@@ -3,6 +3,13 @@ const path = require('path');
 
 const db = new Database(process.env.DB_PATH || path.join(__dirname, 'orders.db'));
 
+// ─── SQLite performance tuning ────────────────────────────────────────────────
+db.pragma('journal_mode = WAL');       // reads never block writes & vice versa
+db.pragma('cache_size = -32000');      // 32 MB page cache
+db.pragma('temp_store = MEMORY');      // temp tables in RAM
+db.pragma('mmap_size = 268435456');    // 256 MB memory-mapped I/O
+db.pragma('synchronous = NORMAL');     // faster writes, still safe with WAL
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,19 +64,33 @@ db.exec(`
     uploaded_at TEXT DEFAULT (datetime('now'))
   );
 
-  CREATE INDEX IF NOT EXISTS idx_orders_month ON orders(purchase_month);
-  CREATE INDEX IF NOT EXISTS idx_orders_week ON orders(purchase_week, purchase_date);
-  CREATE INDEX IF NOT EXISTS idx_orders_brand ON orders(brand);
-  CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);
-  CREATE INDEX IF NOT EXISTS idx_orders_status_month ON orders(order_status, purchase_month);
-  CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(purchase_date);
-  CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(amazon_order_id);
-  CREATE INDEX IF NOT EXISTS idx_returns_month ON returns(return_month);
-  CREATE INDEX IF NOT EXISTS idx_returns_reason ON returns(reason);
-  CREATE INDEX IF NOT EXISTS idx_returns_brand ON returns(brand);
-  CREATE INDEX IF NOT EXISTS idx_returns_date ON returns(return_date);
-  CREATE INDEX IF NOT EXISTS idx_returns_disposition ON returns(disposition);
-  CREATE INDEX IF NOT EXISTS idx_returns_order_id ON returns(order_id);
+  -- Orders: single-column
+  CREATE INDEX IF NOT EXISTS idx_orders_month      ON orders(purchase_month);
+  CREATE INDEX IF NOT EXISTS idx_orders_date       ON orders(purchase_date);
+  CREATE INDEX IF NOT EXISTS idx_orders_week       ON orders(purchase_week);
+  CREATE INDEX IF NOT EXISTS idx_orders_brand      ON orders(brand);
+  CREATE INDEX IF NOT EXISTS idx_orders_sku        ON orders(sku);
+  CREATE INDEX IF NOT EXISTS idx_orders_product    ON orders(product_name);
+  CREATE INDEX IF NOT EXISTS idx_orders_status     ON orders(order_status);
+  CREATE INDEX IF NOT EXISTS idx_orders_order_id   ON orders(amazon_order_id);
+
+  -- Orders: composite — covers the most common filter combos in /api/return-rate
+  CREATE INDEX IF NOT EXISTS idx_orders_status_date  ON orders(order_status, purchase_date);
+  CREATE INDEX IF NOT EXISTS idx_orders_status_brand ON orders(order_status, brand);
+  CREATE INDEX IF NOT EXISTS idx_orders_status_sku   ON orders(order_status, sku);
+  -- Covers the join side: amazon_order_id + sku lookup from returns
+  CREATE INDEX IF NOT EXISTS idx_orders_oid_sku    ON orders(amazon_order_id, sku, brand, product_name);
+
+  -- Returns: single-column
+  CREATE INDEX IF NOT EXISTS idx_returns_order_id  ON returns(order_id);
+  CREATE INDEX IF NOT EXISTS idx_returns_sku       ON returns(sku);
+  CREATE INDEX IF NOT EXISTS idx_returns_date      ON returns(return_date);
+  CREATE INDEX IF NOT EXISTS idx_returns_month     ON returns(return_month);
+  CREATE INDEX IF NOT EXISTS idx_returns_reason    ON returns(reason);
+  CREATE INDEX IF NOT EXISTS idx_returns_brand     ON returns(brand);
+  CREATE INDEX IF NOT EXISTS idx_returns_disp      ON returns(disposition);
+  -- Covers the JOIN condition: r.order_id = o.amazon_order_id AND r.sku = o.sku
+  CREATE INDEX IF NOT EXISTS idx_returns_oid_sku   ON returns(order_id, sku);
 `);
 
 module.exports = db;
