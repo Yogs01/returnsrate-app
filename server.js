@@ -882,33 +882,36 @@ app.get('/api/brand-detail', (req, res) => {
     const ordersQty = db.prepare(`SELECT COALESCE(SUM(quantity), 0) as n FROM orders WHERE ${dF.sql}`)
       .get(...dF.params)?.n || 0;
 
-    // Total returns linked to those orders
+    // Total returns linked to those orders — join on BOTH order_id AND sku to match
+    // the same logic used in the main /api/return-rate coreSql, preventing inflated counts
+    // from returns whose SKU doesn't match any order line item for that order_id.
     const returnsQty = db.prepare(`
       SELECT COALESCE(SUM(r.quantity), 0) as n
       FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
       WHERE ${oF.sql}
     `).get(...oF.params)?.n || 0;
 
-    // Return reasons breakdown
+    // Return reasons — same join condition
     const reasons = db.prepare(`
       SELECT r.reason, SUM(r.quantity) as qty
       FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
       WHERE ${oF.sql} AND r.reason != ''
       GROUP BY r.reason ORDER BY qty DESC LIMIT 20
     `).all(...oF.params);
 
-    // Disposition breakdown
+    // Disposition breakdown — same join condition
     const dispositions = db.prepare(`
       SELECT r.disposition, SUM(r.quantity) as qty
       FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
       WHERE ${oF.sql} AND r.disposition != ''
       GROUP BY r.disposition ORDER BY qty DESC
     `).all(...oF.params);
 
-    // Top returned Styles (product_name) — separate subqueries to avoid JOIN-inflation bug
+    // Top returned Styles — separate subqueries to avoid JOIN-inflation bug,
+    // same r.sku = o.sku condition for consistency with the main table
     const topStyles = db.prepare(`
       SELECT
         oa.product_name, oa.orders_qty,
@@ -922,7 +925,7 @@ app.get('/api/brand-detail', (req, res) => {
       LEFT JOIN (
         SELECT o.product_name, SUM(r.quantity) AS returns_qty
         FROM returns r
-        JOIN orders o ON r.order_id = o.amazon_order_id
+        JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
         WHERE ${oF.sql}
         GROUP BY o.product_name
       ) ra ON ra.product_name = oa.product_name
