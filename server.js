@@ -908,27 +908,26 @@ app.get('/api/brand-detail', (req, res) => {
       GROUP BY r.disposition ORDER BY qty DESC
     `).all(...oF.params);
 
-    // Top returned SKUs — separate subqueries to avoid JOIN-inflation bug
-    // (a single order with N return rows would multiply its quantity N times in a plain JOIN)
-    const topItems = db.prepare(`
+    // Top returned Styles (product_name) — separate subqueries to avoid JOIN-inflation bug
+    const topStyles = db.prepare(`
       SELECT
-        oa.sku, oa.product_name, oa.orders_qty,
+        oa.product_name, oa.orders_qty,
         COALESCE(ra.returns_qty, 0)                                                  AS returns_qty,
         ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)    AS return_rate
       FROM (
-        SELECT sku, MAX(product_name) AS product_name, SUM(quantity) AS orders_qty
-        FROM orders WHERE ${dF.sql}
-        GROUP BY sku HAVING orders_qty >= 3
+        SELECT product_name, SUM(quantity) AS orders_qty
+        FROM orders WHERE ${dF.sql} AND product_name != ''
+        GROUP BY product_name HAVING orders_qty >= 3
       ) oa
       LEFT JOIN (
-        SELECT o.sku, SUM(r.quantity) AS returns_qty
+        SELECT o.product_name, SUM(r.quantity) AS returns_qty
         FROM returns r
-        JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+        JOIN orders o ON r.order_id = o.amazon_order_id
         WHERE ${oF.sql}
-        GROUP BY o.sku
-      ) ra ON ra.sku = oa.sku
+        GROUP BY o.product_name
+      ) ra ON ra.product_name = oa.product_name
       ORDER BY return_rate DESC, returns_qty DESC
-      LIMIT 10
+      LIMIT 15
     `).all(...dF.params, ...oF.params);
 
     // Attach percentage to each reason / disposition
@@ -943,7 +942,7 @@ app.get('/api/brand-detail', (req, res) => {
       summary: { orders_qty: ordersQty, returns_qty: returnsQty, return_rate: returnRate },
       reasons,
       dispositions,
-      topItems
+      topStyles
     });
   } catch(e) {
     console.error('brand-detail error:', e.message);

@@ -507,7 +507,7 @@ async function openDetail(name, type) {
 }
 
 function renderModalDetail(name, type, d) {
-  const { summary, reasons, dispositions, topItems } = d;
+  const { summary, reasons, dispositions, topStyles } = d;
   const rate = summary.return_rate != null ? parseFloat(summary.return_rate) : null;
   const rateColor = rate >= 25 ? '#e53e3e' : rate >= 15 ? '#dd6b20' : rate >= 5 ? '#d69e2e' : '#38a169';
 
@@ -567,27 +567,27 @@ function renderModalDetail(name, type, d) {
     html += `</div></div>`;
   }
 
-  // ── Top Returned SKUs (brand / style drill-down) ──
-  if (topItems.length && type !== 'sku') {
+  // ── Top Returned Styles ──
+  if (topStyles && topStyles.length) {
     html += `<div>
-      <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;border-bottom:1px solid var(--border);padding-bottom:8px">Top Returned SKUs</h3>
+      <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;border-bottom:1px solid var(--border);padding-bottom:8px">
+        Top Returned Styles
+        <span style="font-weight:400;color:var(--text-muted);font-size:12px">(3+ orders, by return rate)</span>
+      </h3>
       <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="border-bottom:2px solid var(--border)">
           <th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">#</th>
-          <th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">SKU / Product</th>
+          <th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Style / Product</th>
           <th style="text-align:right;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Orders</th>
           <th style="text-align:right;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Returns</th>
           <th style="text-align:right;padding:6px 8px;color:var(--text-muted);font-size:11px;text-transform:uppercase">Rate</th>
         </tr></thead>
         <tbody>`;
-    topItems.forEach((item, i) => {
+    topStyles.forEach((item, i) => {
       html += `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:8px;color:var(--text-muted)">${i+1}</td>
-        <td style="padding:8px">
-          <div style="font-weight:600">${esc(item.sku)}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:1px">${esc(item.product_name||'')}</div>
-        </td>
+        <td style="padding:8px;font-weight:500;max-width:280px">${esc(item.product_name||'—')}</td>
         <td style="padding:8px;text-align:right">${n(item.orders_qty)}</td>
         <td style="padding:8px;text-align:right">${n(item.returns_qty)}</td>
         <td style="padding:8px;text-align:right">${rateBadge(item.return_rate)}</td>
