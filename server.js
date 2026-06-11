@@ -910,20 +910,35 @@ app.get('/api/gender-breakdown', (req, res) => {
   if (style) { oClauses.push(`o.product_name LIKE ?`);                  oParams.push(`%${style}%`); }
   const oWhere = oClauses.join(' AND ');
 
+  const hasFilters = !!(since || month || week || year || brand || style);
+
   try {
-    const rows = db.prepare(`
-      SELECT
-        CASE
-          WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown'
-          ELSE r.gender
-        END AS gender,
-        SUM(r.quantity) AS returns_qty
-      FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
-      WHERE ${oWhere}
-      GROUP BY gender
-      ORDER BY returns_qty DESC
-    `).all(...oParams);
+    // When no filters are active, count ALL returns directly — no join needed and no
+    // exclusions from unmatched order records.  This makes the gender total equal the
+    // dashboard total (46,177) rather than the lower joined total (45,447).
+    // When filters ARE active, join orders to apply date / brand constraints.
+    let rows;
+    if (!hasFilters) {
+      rows = db.prepare(`
+        SELECT
+          CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown' ELSE r.gender END AS gender,
+          SUM(r.quantity) AS returns_qty
+        FROM returns r
+        GROUP BY gender
+        ORDER BY returns_qty DESC
+      `).all();
+    } else {
+      rows = db.prepare(`
+        SELECT
+          CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown' ELSE r.gender END AS gender,
+          SUM(r.quantity) AS returns_qty
+        FROM returns r
+        JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+        WHERE ${oWhere}
+        GROUP BY gender
+        ORDER BY returns_qty DESC
+      `).all(...oParams);
+    }
 
     const total = rows.reduce((s, r) => s + r.returns_qty, 0);
     rows.forEach(r => { r.pct = total > 0 ? +(r.returns_qty / total * 100).toFixed(1) : 0; });
