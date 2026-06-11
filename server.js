@@ -747,6 +747,26 @@ app.get('/api/filters', (req, res) => {
   }
 });
 
+// Reusable SQL expression: resolve gender from returns.gender, falling back to product name
+// patterns when the gender field is blank.  Priority order:
+//   1. r.gender if populated
+//   2. "Women's" / "Womens" in product name → Women
+//   3. "Girls" in product name → Girls
+//   4. "Men's" / "Mens" in product name → Men
+//   5. "Boys" in product name → Boys
+//   6. "(M)" size suffix in product name → Men  (shoe-catalog convention for this store)
+//   7. Unknown
+const GENDER_EXPR = `
+  CASE
+    WHEN r.gender IS NOT NULL AND r.gender != '' THEN r.gender
+    WHEN r.product_name LIKE '%Women''s%' OR r.product_name LIKE '%Womens%' THEN 'Women'
+    WHEN r.product_name LIKE '%Girls%'                                       THEN 'Girls'
+    WHEN r.product_name LIKE '%Men''s%'  OR r.product_name LIKE '%Mens%'    THEN 'Men'
+    WHEN r.product_name LIKE '%Boys%'                                        THEN 'Boys'
+    WHEN r.product_name LIKE '% (M)%'                                        THEN 'Men'
+    ELSE 'Unknown'
+  END`;
+
 // GET /api/return-rate?groupBy=sku|style|brand&since=YYYY-MM-DD&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders&sortDir=asc|desc
 app.get('/api/return-rate', (req, res) => {
   const groupBy  = ['sku', 'style', 'brand'].includes(req.query.groupBy) ? req.query.groupBy : 'sku';
@@ -920,18 +940,14 @@ app.get('/api/gender-breakdown', (req, res) => {
     let rows;
     if (!hasFilters) {
       rows = db.prepare(`
-        SELECT
-          CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown' ELSE r.gender END AS gender,
-          SUM(r.quantity) AS returns_qty
+        SELECT ${GENDER_EXPR} AS gender, SUM(r.quantity) AS returns_qty
         FROM returns r
         GROUP BY gender
         ORDER BY returns_qty DESC
       `).all();
     } else {
       rows = db.prepare(`
-        SELECT
-          CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown' ELSE r.gender END AS gender,
-          SUM(r.quantity) AS returns_qty
+        SELECT ${GENDER_EXPR} AS gender, SUM(r.quantity) AS returns_qty
         FROM returns r
         JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
         WHERE ${oWhere}
@@ -1043,7 +1059,7 @@ app.get('/api/brand-detail', (req, res) => {
     // Gender breakdown for this brand/sku/style
     const genderRows = db.prepare(`
       SELECT
-        CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown' ELSE r.gender END AS gender,
+        ${GENDER_EXPR} AS gender,
         SUM(r.quantity) AS returns_qty
       FROM returns r
       JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
