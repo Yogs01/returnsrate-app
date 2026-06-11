@@ -234,6 +234,7 @@ let currentPage = 1;
 let debTimer;
 let allFilters = {};
 let lastData = { records: [], total: 0 };
+let _loadSeq = 0; // incremented each load(); stale responses check against this and self-discard
 
 // Client-side response cache — avoids re-fetching the same query within 45 seconds
 const _apiCache = new Map();
@@ -356,6 +357,7 @@ function timelineSince(code) {
 
 async function load(page) {
   currentPage = page || currentPage;
+  const seq = ++_loadSeq; // stamp this request; stale responses self-discard on arrival
 
   const timelineRaw = document.getElementById('timelineFilter').value;
   const since     = timelineSince(timelineRaw);
@@ -390,6 +392,7 @@ async function load(page) {
       fetchCached(`/api/return-rate?${qs}`),
       loadGenderBreakdown(filterQs)
     ]);
+    if (seq !== _loadSeq) return; // a newer load() fired while we were waiting — discard this result
     if (d.error) { showError(d.error); return; }
     lastData = d;
     renderTable(d);
@@ -399,10 +402,11 @@ async function load(page) {
     tableWrap.classList.remove('is-loading');
     tableWrap.classList.add('did-load');
   } catch(e) {
+    if (seq !== _loadSeq) return; // stale error — swallow silently
     showError(e.message);
     tableWrap.classList.remove('is-loading');
   } finally {
-    loadingBar.style.display = 'none';
+    if (seq === _loadSeq) loadingBar.style.display = 'none';
   }
 }
 
