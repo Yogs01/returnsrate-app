@@ -885,6 +885,57 @@ app.get('/api/return-rate', (req, res) => {
   }
 });
 
+// GET /api/gender-breakdown — returns breakdown by Men / Women / Other
+// Respects the same since/month/week/year/brand/style filters as /api/return-rate.
+// Gender comes from the returns.gender column populated during upload.
+app.get('/api/gender-breakdown', (req, res) => {
+  const since = req.query.since || '';
+  const month = req.query.month || '';
+  const week  = req.query.week  ? parseInt(req.query.week) : null;
+  const year  = req.query.year  ? String(req.query.year)   : '';
+  const brand = req.query.brand || '';
+  const style = req.query.style || '';
+
+  // Orders filter with 'o.' prefix (for the JOIN)
+  const oClauses = [`o.order_status != 'On Trial'`];
+  const oParams  = [];
+  if (since) { oClauses.push(`o.purchase_date >= ?`);                   oParams.push(since); }
+  if (month) { oClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`); oParams.push(month); }
+  if (week)  { oClauses.push(`o.purchase_week = ?`);                    oParams.push(week);  }
+  if (year)  { oClauses.push(`strftime('%Y', o.purchase_date) = ?`);    oParams.push(year);  }
+  if (brand) { oClauses.push(`o.brand = ?`);                            oParams.push(brand); }
+  if (style) { oClauses.push(`o.product_name LIKE ?`);                  oParams.push(`%${style}%`); }
+  const oWhere = oClauses.join(' AND ');
+
+  try {
+    const rows = db.prepare(`
+      SELECT
+        CASE
+          WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown'
+          ELSE r.gender
+        END AS gender,
+        SUM(r.quantity) AS returns_qty
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+      WHERE ${oWhere}
+      GROUP BY gender
+      ORDER BY returns_qty DESC
+    `).all(...oParams);
+
+    const total = rows.reduce((s, r) => s + r.returns_qty, 0);
+    rows.forEach(r => { r.pct = total > 0 ? +(r.returns_qty / total * 100).toFixed(1) : 0; });
+
+    // Put Unknown at the end if present
+    const known   = rows.filter(r => r.gender !== 'Unknown');
+    const unknown = rows.filter(r => r.gender === 'Unknown');
+
+    res.json({ genders: [...known, ...unknown], total });
+  } catch(e) {
+    console.error('gender-breakdown error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/brand-detail — drill-down analysis for a single brand / sku / style
 // Returns return reasons, disposition breakdown, and top SKUs for the selected dimension.
 // Respects the same since/month/week/year time filters as /api/return-rate.
