@@ -1423,6 +1423,25 @@ app.delete('/api/returns/cleanup-empty-disposition', (req, res) => {
   res.json({ deleted: before - after, remaining: after });
 });
 
+// GET /api/version — returns current git commit hash (used to verify Railway deployment)
+app.get('/api/version', (req, res) => {
+  const { execSync } = require('child_process');
+  let commit = 'unknown';
+  try { commit = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch(e) {}
+  res.json({ commit, built: new Date().toISOString() });
+});
+
+// GET /api/debug/gender — diagnose gender backfill status
+app.get('/api/debug/gender', (req, res) => {
+  const brand = req.query.brand || 'Sorel';
+  const total     = db.prepare(`SELECT COUNT(*) as n FROM returns WHERE brand = ?`).get(brand).n;
+  const unknown   = db.prepare(`SELECT COUNT(*) as n FROM returns WHERE brand = ? AND (gender IS NULL OR gender = '' OR gender = 'Unknown')`).get(brand).n;
+  const hasOrder  = db.prepare(`SELECT COUNT(*) as n FROM returns r WHERE r.brand = ? AND (r.gender IS NULL OR r.gender = '' OR r.gender = 'Unknown') AND EXISTS (SELECT 1 FROM orders o WHERE o.amazon_order_id = r.order_id AND o.sku = r.sku)`).get(brand).n;
+  const hasGender = db.prepare(`SELECT COUNT(*) as n FROM returns r WHERE r.brand = ? AND (r.gender IS NULL OR r.gender = '' OR r.gender = 'Unknown') AND EXISTS (SELECT 1 FROM orders o WHERE o.amazon_order_id = r.order_id AND o.sku = r.sku AND (o.product_name LIKE '%Women''s%' OR o.product_name LIKE '% (W)%' OR o.product_name LIKE '%Men''s%' OR o.product_name LIKE '% (M)%' OR o.product_name LIKE '%Girls%' OR o.product_name LIKE '%Boys%'))`).get(brand).n;
+  const sampleUnknown = db.prepare(`SELECT r.order_id, r.sku, r.product_name AS ret_name, o.product_name AS ord_name, r.gender FROM returns r LEFT JOIN orders o ON o.amazon_order_id = r.order_id AND o.sku = r.sku WHERE r.brand = ? AND (r.gender IS NULL OR r.gender = '' OR r.gender = 'Unknown') LIMIT 5`).all(brand);
+  res.json({ brand, total, unknown, hasOrder, hasGender, sampleUnknown });
+});
+
 const server = app.listen(PORT, () => {
   console.log(`\n✅ Orders & Returns App running at http://localhost:${PORT}\n`);
 });
