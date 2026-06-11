@@ -142,40 +142,68 @@ function inferGender(rawGender, productName) {
   return '';  // genuinely unknown — stored as empty, displayed as "Unknown"
 }
 
-// One-time startup backfill: fill gender for existing returns rows whose gender
-// column is blank but whose product_name contains a detectable pattern.
-// Safe to run every restart — WHERE clause limits it to empty-gender rows only.
-(function backfillReturnGender() {
+// Fill gender for returns rows whose gender column is blank.
+// Pass 1 — uses the return's own product_name (fast, no join).
+// Pass 2 — uses the matched order's product_name (catches cases where the
+//           returns CSV product name differs from the orders CSV product name).
+// Safe to call on every startup and after every upload: WHERE clauses limit
+// work to empty-gender rows only, so re-runs are cheap no-ops.
+function backfillReturnGender() {
   try {
-    const result = db.prepare(`
-      UPDATE returns SET gender =
-        CASE
-          WHEN product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%'
-            OR product_name LIKE '% (W)%'                          THEN 'Women'
-          WHEN product_name LIKE '%Girls%'                          THEN 'Girls'
-          WHEN product_name LIKE '%Men''s%' OR product_name LIKE '%Mens%'
-                                                                    THEN 'Men'
-          WHEN product_name LIKE '%Boys%'                           THEN 'Boys'
-          WHEN product_name LIKE '% (M)%'                           THEN 'Men'
-          ELSE ''
-        END
+    const patternWhere = `(
+      product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%' OR product_name LIKE '% (W)%'
+      OR product_name LIKE '%Girls%'
+      OR product_name LIKE '%Men''s%'  OR product_name LIKE '%Mens%'
+      OR product_name LIKE '%Boys%'
+      OR product_name LIKE '% (M)%'
+    )`;
+    const genderCase = `CASE
+      WHEN product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%'
+        OR product_name LIKE '% (W)%'                          THEN 'Women'
+      WHEN product_name LIKE '%Girls%'                          THEN 'Girls'
+      WHEN product_name LIKE '%Men''s%' OR product_name LIKE '%Mens%'
+                                                                THEN 'Men'
+      WHEN product_name LIKE '%Boys%'                           THEN 'Boys'
+      WHEN product_name LIKE '% (M)%'                           THEN 'Men'
+      ELSE ''
+    END`;
+
+    // Pass 1: infer from returns.product_name
+    const r1 = db.prepare(`
+      UPDATE returns SET gender = ${genderCase}
+      WHERE (gender IS NULL OR gender = '') AND ${patternWhere}
+    `).run();
+
+    // Pass 2: infer from matching orders.product_name for rows still blank
+    const orderPatternWhere = patternWhere.replace(/product_name/g, 'o.product_name');
+    const orderGenderCase   = genderCase.replace(/product_name/g, 'o.product_name');
+    const r2 = db.prepare(`
+      UPDATE returns SET gender = (
+        SELECT ${orderGenderCase}
+        FROM orders o
+        WHERE o.amazon_order_id = returns.order_id AND o.sku = returns.sku
+        LIMIT 1
+      )
       WHERE (gender IS NULL OR gender = '')
-        AND (
-          product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%' OR product_name LIKE '% (W)%'
-          OR product_name LIKE '%Girls%'
-          OR product_name LIKE '%Men''s%' OR product_name LIKE '%Mens%'
-          OR product_name LIKE '%Boys%'
-          OR product_name LIKE '% (M)%'
+        AND EXISTS (
+          SELECT 1 FROM orders o
+          WHERE o.amazon_order_id = returns.order_id AND o.sku = returns.sku
+            AND ${orderPatternWhere}
         )
     `).run();
-    if (result.changes > 0) {
-      console.log(`[startup] backfilled gender for ${result.changes} returns rows`);
+
+    const total = r1.changes + r2.changes;
+    if (total > 0) {
+      console.log(`[backfill] gender: ${r1.changes} from return names, ${r2.changes} from order names`);
       invalidateFiltersCache();
     }
+    return total;
   } catch(e) {
-    console.error('[startup] gender backfill error:', e.message);
+    console.error('[backfill] gender error:', e.message);
+    return 0;
   }
-})();
+}
+backfillReturnGender(); // run on startup
 
 // Returns the canonical KNOWN_BRANDS spelling for a brand (case-insensitive match).
 // E.g. "SOREL" → "Sorel", "hoka" → "HOKA", "merrell" → "Merrell".
@@ -518,6 +546,7 @@ async function processFileAsync(filePath, dataType, uploadedBy, filename, jobId)
       .run(filename, fHash, dataType, ordersAdded + returnsAdded, ordersSkipped + returnsSkipped, uploadedBy);
 
     invalidateFiltersCache(); // new data means filters may have changed
+    backfillReturnGender();   // fill gender for any newly added returns with blank gender
     job.status = 'done';
     job.ordersAdded = ordersAdded; job.ordersSkipped = ordersSkipped;
     job.returnsAdded = returnsAdded; job.returnsSkipped = returnsSkipped;
