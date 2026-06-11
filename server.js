@@ -747,16 +747,17 @@ app.get('/api/filters', (req, res) => {
   }
 });
 
-// GET /api/return-rate?groupBy=sku|style|brand&since=YYYY-MM-DD&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders
+// GET /api/return-rate?groupBy=sku|style|brand&since=YYYY-MM-DD&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders&sortDir=asc|desc
 app.get('/api/return-rate', (req, res) => {
   const groupBy  = ['sku', 'style', 'brand'].includes(req.query.groupBy) ? req.query.groupBy : 'sku';
-  const since    = req.query.since  || '';   // YYYY-MM-DD cutoff (Past 3M / 12M / 2Y / 3Y)
+  const since    = req.query.since  || '';
   const month    = req.query.month  || '';
   const week     = req.query.week   ? parseInt(req.query.week)  : null;
   const year     = req.query.year   ? String(req.query.year)    : '';
   const brand    = req.query.brand  || '';
   const style    = req.query.style  || '';
   const sort     = ['rate', 'returns', 'orders'].includes(req.query.sort) ? req.query.sort : 'rate';
+  const sortDir  = req.query.sortDir === 'asc' ? 'ASC' : 'DESC';
   const minOrders = Math.max(1, parseInt(req.query.minOrders) || 1);
   const page     = Math.max(1, parseInt(req.query.page) || 1);
   const limit    = 50;
@@ -785,9 +786,9 @@ app.get('/api/return-rate', (req, res) => {
   const oF = buildFilters();   // no prefix — selects directly from orders
   const rF = buildFilters('o'); // 'o' prefix — orders aliased as o in the returns subquery
 
-  const orderSQL = sort === 'returns' ? 'returns_qty DESC, return_rate DESC'
-                 : sort === 'orders'  ? 'orders_qty DESC'
-                 : 'return_rate DESC, returns_qty DESC';
+  const orderSQL = sort === 'returns' ? `returns_qty ${sortDir}, return_rate ${sortDir}`
+                 : sort === 'orders'  ? `orders_qty ${sortDir}`
+                 : `return_rate ${sortDir}, returns_qty ${sortDir}`;
 
   // Aggregate orders and returns SEPARATELY, then join the aggregates.
   // This prevents the classic JOIN-inflation bug where an order with N return records
@@ -1022,6 +1023,20 @@ app.get('/api/brand-detail', (req, res) => {
       LIMIT 15
     `).all(...dF.params, ...oF.params);
 
+    // Gender breakdown for this brand/sku/style
+    const genderRows = db.prepare(`
+      SELECT
+        CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown' ELSE r.gender END AS gender,
+        SUM(r.quantity) AS returns_qty
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+      WHERE ${oF.sql}
+      GROUP BY gender ORDER BY returns_qty DESC
+    `).all(...oF.params);
+    const totalG = genderRows.reduce((s, r) => s + r.returns_qty, 0);
+    genderRows.forEach(r => { r.pct = totalG > 0 ? +(r.returns_qty / totalG * 100).toFixed(1) : 0; });
+    const genders = [...genderRows.filter(r => r.gender !== 'Unknown'), ...genderRows.filter(r => r.gender === 'Unknown')];
+
     // Attach percentage to each reason / disposition
     const totalR = reasons.reduce((s, r) => s + r.qty, 0);
     const totalD = dispositions.reduce((s, r) => s + r.qty, 0);
@@ -1034,6 +1049,7 @@ app.get('/api/brand-detail', (req, res) => {
       summary: { orders_qty: ordersQty, returns_qty: returnsQty, return_rate: returnRate },
       reasons,
       dispositions,
+      genders,
       topStyles
     });
   } catch(e) {

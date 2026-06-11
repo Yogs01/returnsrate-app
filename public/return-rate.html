@@ -229,6 +229,7 @@
 <script>
 let currentView = 'sku';
 let currentSort = 'rate';
+let currentSortDir = 'desc';
 let currentPage = 1;
 let debTimer;
 let allFilters = {};
@@ -302,16 +303,20 @@ function setView(view, btn) {
 
 function toggleSort(col) {
   if (currentSort === col) {
-    // Already sorted, flip direction (but we only support desc for now — re-trigger)
+    // Same column clicked — flip direction
+    currentSortDir = currentSortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    // New column — default to descending (highest first)
+    currentSort = col;
+    currentSortDir = 'desc';
   }
-  currentSort = col;
-  // Update header highlights
+  // Update header arrow indicators
   ['brand','orders','returns','rate'].forEach(c => {
     const th = document.getElementById(`th${c.charAt(0).toUpperCase()+c.slice(1)}`);
-    if (th) { th.classList.remove('asc','desc'); }
+    if (th) th.classList.remove('asc','desc');
   });
   const th = document.getElementById(`th${col.charAt(0).toUpperCase()+col.slice(1)}`);
-  if (th) th.classList.add('desc');
+  if (th) th.classList.add(currentSortDir);
   load(1);
 }
 
@@ -355,7 +360,7 @@ async function load(page) {
   }
 
   const qs = new URLSearchParams({
-    groupBy: currentView, sort: currentSort, page: currentPage,
+    groupBy: currentView, sort: currentSort, sortDir: currentSortDir, page: currentPage,
     since, month, week, year, brand, style, minOrders
   });
 
@@ -625,7 +630,7 @@ async function openDetail(name, type) {
 }
 
 function renderModalDetail(name, type, d) {
-  const { summary, reasons, dispositions, topStyles } = d;
+  const { summary, reasons, dispositions, genders, topStyles } = d;
   const rate = summary.return_rate != null ? parseFloat(summary.return_rate) : null;
   const rateColor = rate >= 25 ? '#e53e3e' : rate >= 15 ? '#dd6b20' : rate >= 5 ? '#d69e2e' : '#38a169';
 
@@ -683,6 +688,44 @@ function renderModalDetail(name, type, d) {
       </div>`;
     });
     html += `</div></div>`;
+  }
+
+  // ── Gender Breakdown ──
+  if (genders && genders.filter(g => g.gender !== 'Unknown').length) {
+    const colorMap = {
+      'Women': { bg:'#fce7f3', text:'#9d174d', bar:'#ec4899' },
+      'Men':   { bg:'#dbeafe', text:'#1e40af', bar:'#3b82f6' },
+      'Boys':  { bg:'#e0f2fe', text:'#075985', bar:'#0ea5e9' },
+      'Girls': { bg:'#fdf4ff', text:'#7e22ce', bar:'#a855f7' },
+    };
+    const defaultColor = { bg:'#f3f4f6', text:'#374151', bar:'#9ca3af' };
+    const maxG = Math.max(...genders.map(g => g.returns_qty));
+    html += `<div style="margin-bottom:24px">
+      <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;border-bottom:1px solid var(--border);padding-bottom:8px">Gender Breakdown</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">`;
+    genders.forEach(g => {
+      const c = colorMap[g.gender] || defaultColor;
+      html += `<div style="background:${c.bg};color:${c.text};border-radius:8px;padding:8px 14px;text-align:center;min-width:90px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase">${esc(g.gender)}</div>
+        <div style="font-size:18px;font-weight:800">${n(g.returns_qty)}</div>
+        <div style="font-size:11px;font-weight:600;opacity:.8">${g.pct}%</div>
+      </div>`;
+    });
+    html += `</div>`;
+    genders.forEach(g => {
+      const c = colorMap[g.gender] || defaultColor;
+      const w = maxG > 0 ? (g.returns_qty / maxG * 100) : 0;
+      html += `<div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+          <span style="font-weight:600;color:${c.text}">${esc(g.gender)}</span>
+          <span style="color:var(--text-muted)">${n(g.returns_qty)} units (${g.pct}%)</span>
+        </div>
+        <div style="height:7px;background:var(--border);border-radius:4px">
+          <div style="width:${w}%;height:100%;background:${c.bar};border-radius:4px;transition:width .4s"></div>
+        </div>
+      </div>`;
+    });
+    html += `</div>`;
   }
 
   // ── Top Returned Styles ──
