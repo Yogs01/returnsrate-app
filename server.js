@@ -128,6 +128,55 @@ const KNOWN_BRANDS = [
   'Darn Tough','Smartwool','Wigwam','Thorlos','Bombas'
 ].sort((a, b) => b.length - a.length);
 
+// Infer gender from an explicit value (CSV column) or product name patterns.
+// Called at record-build time so the result is stored — no LIKE scans at query time.
+function inferGender(rawGender, productName) {
+  const g = String(rawGender || '').trim();
+  if (g) return g; // explicit value wins
+  const p = String(productName || '').toLowerCase();
+  if (p.includes("women's") || p.includes('womens') || p.includes(' (w)')) return 'Women';
+  if (p.includes('girls'))                                                   return 'Girls';
+  if (p.includes("men's")  || p.includes('mens'))                           return 'Men';
+  if (p.includes('boys'))                                                    return 'Boys';
+  if (p.includes(' (m)'))                                                    return 'Men';
+  return '';  // genuinely unknown — stored as empty, displayed as "Unknown"
+}
+
+// One-time startup backfill: fill gender for existing returns rows whose gender
+// column is blank but whose product_name contains a detectable pattern.
+// Safe to run every restart — WHERE clause limits it to empty-gender rows only.
+(function backfillReturnGender() {
+  try {
+    const result = db.prepare(`
+      UPDATE returns SET gender =
+        CASE
+          WHEN product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%'
+            OR product_name LIKE '% (W)%'                          THEN 'Women'
+          WHEN product_name LIKE '%Girls%'                          THEN 'Girls'
+          WHEN product_name LIKE '%Men''s%' OR product_name LIKE '%Mens%'
+                                                                    THEN 'Men'
+          WHEN product_name LIKE '%Boys%'                           THEN 'Boys'
+          WHEN product_name LIKE '% (M)%'                           THEN 'Men'
+          ELSE ''
+        END
+      WHERE (gender IS NULL OR gender = '')
+        AND (
+          product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%' OR product_name LIKE '% (W)%'
+          OR product_name LIKE '%Girls%'
+          OR product_name LIKE '%Men''s%' OR product_name LIKE '%Mens%'
+          OR product_name LIKE '%Boys%'
+          OR product_name LIKE '% (M)%'
+        )
+    `).run();
+    if (result.changes > 0) {
+      console.log(`[startup] backfilled gender for ${result.changes} returns rows`);
+      invalidateFiltersCache();
+    }
+  } catch(e) {
+    console.error('[startup] gender backfill error:', e.message);
+  }
+})();
+
 // Returns the canonical KNOWN_BRANDS spelling for a brand (case-insensitive match).
 // E.g. "SOREL" → "Sorel", "hoka" → "HOKA", "merrell" → "Merrell".
 // Falls back to the original string trimmed if not in the list.
@@ -275,7 +324,7 @@ function buildReturnRecord(row) {
     disposition:        String(row['Detailed-disposition'] || row['detailed-disposition'] || '').trim(),
     reason,
     status:             String(row['Status'] || row['status'] || '').trim(),
-    gender:             String(row['Gender'] || row['gender'] || '').trim(),
+    gender:             inferGender(row['Gender'] || row['gender'] || '', row['Product Name'] || row['product-name'] || ''),
     brand:              canonicalizeBrand(String(row['Brand'] || row['brand'] || '').trim()),
     customer_comments:  String(row['Customer-comments'] || row['customer-comments'] || '').trim(),
     row_hash:           hash(String(row['Order ID'] || row['order-id'] || '').trim(), String(row['ASIN'] || row['asin'] || '').trim(), rd || '', reason),
@@ -747,26 +796,9 @@ app.get('/api/filters', (req, res) => {
   }
 });
 
-// Reusable SQL expression: resolve gender from returns.gender, falling back to product name
-// patterns when the gender field is blank.  Priority order:
-//   1. r.gender if populated
-//   2. "Women's" / "Womens" in product name → Women
-//   3. "Girls" in product name → Girls
-//   4. "Men's" / "Mens" in product name → Men
-//   5. "Boys" in product name → Boys
-//   6. "(M)" size suffix in product name → Men  (shoe-catalog convention for this store)
-//   7. Unknown
-const GENDER_EXPR = `
-  CASE
-    WHEN r.gender IS NOT NULL AND r.gender != '' THEN r.gender
-    WHEN r.product_name LIKE '%Women''s%' OR r.product_name LIKE '%Womens%'
-      OR r.product_name LIKE '% (W)%'                                        THEN 'Women'
-    WHEN r.product_name LIKE '%Girls%'                                       THEN 'Girls'
-    WHEN r.product_name LIKE '%Men''s%'  OR r.product_name LIKE '%Mens%'    THEN 'Men'
-    WHEN r.product_name LIKE '%Boys%'                                        THEN 'Boys'
-    WHEN r.product_name LIKE '% (M)%'                                        THEN 'Men'
-    ELSE 'Unknown'
-  END`;
+// Gender is pre-computed and stored at insert/backfill time by inferGender().
+// Queries just need a null/empty → 'Unknown' fallback — no expensive LIKE scans.
+const GENDER_EXPR = `CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Unknown' ELSE r.gender END`;
 
 // GET /api/return-rate?groupBy=sku|style|brand&since=YYYY-MM-DD&month=&week=&year=&brand=&style=&page=&sort=rate|returns|orders&sortDir=asc|desc
 app.get('/api/return-rate', (req, res) => {

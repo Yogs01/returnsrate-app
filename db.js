@@ -89,6 +89,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_returns_reason    ON returns(reason);
   CREATE INDEX IF NOT EXISTS idx_returns_brand     ON returns(brand);
   CREATE INDEX IF NOT EXISTS idx_returns_disp      ON returns(disposition);
+  CREATE INDEX IF NOT EXISTS idx_returns_gender    ON returns(gender);
   -- Covers the JOIN condition: r.order_id = o.amazon_order_id AND r.sku = o.sku
   CREATE INDEX IF NOT EXISTS idx_returns_oid_sku   ON returns(order_id, sku);
 `);
