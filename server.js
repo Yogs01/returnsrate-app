@@ -759,7 +759,8 @@ app.get('/api/filters', (req, res) => {
 const GENDER_EXPR = `
   CASE
     WHEN r.gender IS NOT NULL AND r.gender != '' THEN r.gender
-    WHEN r.product_name LIKE '%Women''s%' OR r.product_name LIKE '%Womens%' THEN 'Women'
+    WHEN r.product_name LIKE '%Women''s%' OR r.product_name LIKE '%Womens%'
+      OR r.product_name LIKE '% (W)%'                                        THEN 'Women'
     WHEN r.product_name LIKE '%Girls%'                                       THEN 'Girls'
     WHEN r.product_name LIKE '%Men''s%'  OR r.product_name LIKE '%Mens%'    THEN 'Men'
     WHEN r.product_name LIKE '%Boys%'                                        THEN 'Boys'
