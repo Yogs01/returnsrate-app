@@ -132,7 +132,8 @@ const KNOWN_BRANDS = [
 // Called at record-build time so the result is stored — no LIKE scans at query time.
 function inferGender(rawGender, productName) {
   const g = String(rawGender || '').trim();
-  if (g) return g; // explicit value wins
+  // Treat blank or literal "Unknown" (from Amazon CSV) as unresolved — try product name instead
+  if (g && g.toLowerCase() !== 'unknown') return g;
   const p = String(productName || '').toLowerCase();
   if (p.includes("women's") || p.includes('womens') || p.includes(' (w)')) return 'Women';
   if (p.includes('girls'))                                                   return 'Girls';
@@ -142,14 +143,19 @@ function inferGender(rawGender, productName) {
   return '';  // genuinely unknown — stored as empty, displayed as "Unknown"
 }
 
-// Fill gender for returns rows whose gender column is blank.
+// Fill gender for returns rows whose gender column is blank or 'Unknown'.
 // Pass 1 — uses the return's own product_name (fast, no join).
 // Pass 2 — uses the matched order's product_name (catches cases where the
 //           returns CSV product name differs from the orders CSV product name).
+// 'Unknown' (literal string from Amazon CSV) is treated the same as blank —
+// we try to override it with a real value inferred from product name.
 // Safe to call on every startup and after every upload: WHERE clauses limit
-// work to empty-gender rows only, so re-runs are cheap no-ops.
+// work to unresolved rows only, so re-runs are cheap no-ops.
 function backfillReturnGender() {
   try {
+    // Rows eligible for backfill: blank, NULL, or literal 'Unknown' from CSV
+    const blankGender = `(gender IS NULL OR gender = '' OR gender = 'Unknown')`;
+
     const patternWhere = `(
       product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%' OR product_name LIKE '% (W)%'
       OR product_name LIKE '%Girls%'
@@ -171,10 +177,10 @@ function backfillReturnGender() {
     // Pass 1: infer from returns.product_name
     const r1 = db.prepare(`
       UPDATE returns SET gender = ${genderCase}
-      WHERE (gender IS NULL OR gender = '') AND ${patternWhere}
+      WHERE ${blankGender} AND ${patternWhere}
     `).run();
 
-    // Pass 2: infer from matching orders.product_name for rows still blank
+    // Pass 2: infer from matching orders.product_name for rows still unresolved
     const orderPatternWhere = patternWhere.replace(/product_name/g, 'o.product_name');
     const orderGenderCase   = genderCase.replace(/product_name/g, 'o.product_name');
     const r2 = db.prepare(`
@@ -184,7 +190,7 @@ function backfillReturnGender() {
         WHERE o.amazon_order_id = returns.order_id AND o.sku = returns.sku
         LIMIT 1
       )
-      WHERE (gender IS NULL OR gender = '')
+      WHERE ${blankGender}
         AND EXISTS (
           SELECT 1 FROM orders o
           WHERE o.amazon_order_id = returns.order_id AND o.sku = returns.sku
