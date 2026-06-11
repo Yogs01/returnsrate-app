@@ -857,8 +857,10 @@ app.get('/api/return-rate', (req, res) => {
       // No filters — just count everything (matches dashboard exactly)
       totalReturns = db.prepare(`SELECT COALESCE(SUM(quantity), 0) as n FROM returns`).get()?.n || 0;
     } else {
-      // Filtered — count returns linked to orders that match all active filters via EXISTS
-      const exClauses = [`o.amazon_order_id = r.order_id`, `o.order_status != 'On Trial'`];
+      // Filtered — count returns linked to orders that match all active filters via EXISTS.
+      // Include o.sku = r.sku so this is consistent with the main coreSql JOIN condition
+      // (avoids inflated counts from returns whose SKU doesn't match the ordered SKU).
+      const exClauses = [`o.amazon_order_id = r.order_id`, `o.sku = r.sku`, `o.order_status != 'On Trial'`];
       const exParams  = [];
       if (since) { exClauses.push(`o.purchase_date >= ?`);                    exParams.push(since); }
       if (month) { exClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`);  exParams.push(month); }
