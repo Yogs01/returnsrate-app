@@ -66,7 +66,7 @@
       display: none;
     }
     @keyframes shimmer { 0%{background-position:100% 0} 100%{background-position:-100% 0} }
-    .card { position: relative; }
+    .card { position: relative; overflow: hidden; }
   </style>
 </head>
 <body>
@@ -182,10 +182,10 @@
             <tr id="tableHead">
               <th style="width:40px">#</th>
               <th id="thName">Name</th>
-              <th id="thBrand" class="sort-th desc" onclick="toggleSort('brand')">Brand<span class="sort-arrow"></span></th>
+              <th id="thBrand" class="sort-th" onclick="toggleSort('brand')">Brand<span class="sort-arrow"></span></th>
               <th class="sort-th text-right" id="thOrders" onclick="toggleSort('orders')">Orders<span class="sort-arrow"></span></th>
               <th class="sort-th text-right" id="thReturns" onclick="toggleSort('returns')">Returns<span class="sort-arrow"></span></th>
-              <th class="sort-th text-right" id="thRate" onclick="toggleSort('rate')">Return Rate<span class="sort-arrow"></span></th>
+              <th class="sort-th text-right desc" id="thRate" onclick="toggleSort('rate')">Return Rate<span class="sort-arrow"></span></th>
               <th style="min-width:120px">Rate Visual</th>
             </tr>
           </thead>
@@ -292,8 +292,18 @@ async function loadFilters() {
 function setView(view, btn) {
   currentView = view;
   currentPage = 1;
+  // Reset sort to default (highest rate first) when switching views
+  currentSort    = 'rate';
+  currentSortDir = 'desc';
   document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+
+  // Re-sync all sort arrow indicators to the reset state
+  ['brand','orders','returns','rate'].forEach(c => {
+    const th = document.getElementById(`th${c.charAt(0).toUpperCase()+c.slice(1)}`);
+    if (th) th.classList.remove('asc','desc');
+  });
+  document.getElementById('thRate').classList.add('desc');
 
   // Update Brand column visibility (hide for By Brand view)
   document.getElementById('thBrand').style.display = view === 'brand' ? 'none' : '';
@@ -323,6 +333,7 @@ function toggleSort(col) {
 function debounce() { clearTimeout(debTimer); debTimer = setTimeout(() => load(1), 350); }
 
 function clearFilters() {
+  clearApiCache(); // force fresh fetch — don't serve 45s-old data after resetting filters
   document.getElementById('timelineFilter').value  = '';
   document.getElementById('monthFilter').value     = '';
   document.getElementById('weekFilter').value      = '';
@@ -363,6 +374,8 @@ async function load(page) {
     groupBy: currentView, sort: currentSort, sortDir: currentSortDir, page: currentPage,
     since, month, week, year, brand, style, minOrders
   });
+  // Separate, minimal query string for endpoints that don't care about groupBy/sort/page
+  const filterQs = new URLSearchParams({ since, month, week, year, brand, style });
 
   // Fade the existing table instead of replacing with a spinner — much smoother
   const tableWrap = document.querySelector('.table-wrap');
@@ -375,7 +388,7 @@ async function load(page) {
   try {
     const [d] = await Promise.all([
       fetchCached(`/api/return-rate?${qs}`),
-      loadGenderBreakdown(qs)
+      loadGenderBreakdown(filterQs)
     ]);
     if (d.error) { showError(d.error); return; }
     lastData = d;
