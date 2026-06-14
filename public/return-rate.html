@@ -660,7 +660,7 @@ async function openDetail(name, type) {
 }
 
 function renderModalDetail(name, type, d) {
-  const { summary, reasons, dispositions, genders, topStyles } = d;
+  const { summary, reasons, dispositions, genders, genderTotal, topStyles } = d;
   const rate = summary.return_rate != null ? parseFloat(summary.return_rate) : null;
   const rateColor = rate >= 25 ? '#e53e3e' : rate >= 15 ? '#dd6b20' : rate >= 5 ? '#d69e2e' : '#38a169';
 
