@@ -213,8 +213,6 @@ function backfillReturnGender() {
     return 0;
   }
 }
-backfillReturnGender(); // run on startup
-
 // Fill gender for orders rows that have a blank gender column.
 // Uses the same patterns as inferGender() / backfillReturnGender().
 function backfillOrderGender() {
@@ -245,7 +243,8 @@ function backfillOrderGender() {
     return 0;
   }
 }
-backfillOrderGender(); // run on startup
+// Startup backfills are deferred until after app.listen() so Railway's health
+// check succeeds before the (potentially slow) LIKE-scan migrations run.
 
 // Returns the canonical KNOWN_BRANDS spelling for a brand (case-insensitive match).
 // E.g. "SOREL" → "Sorel", "hoka" → "HOKA", "merrell" → "Merrell".
@@ -1511,5 +1510,10 @@ app.get('/api/debug/gender', (req, res) => {
 
 const server = app.listen(PORT, () => {
   console.log(`\n✅ Orders & Returns App running at http://localhost:${PORT}\n`);
+  // Run backfills after the server is up so Railway's health check succeeds first
+  setImmediate(() => {
+    backfillReturnGender();
+    backfillOrderGender();
+  });
 });
 server.setTimeout(600000); // 10 minutes for large uploads
