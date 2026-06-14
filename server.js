@@ -83,13 +83,17 @@ function fileHash(filePath) {
   return crypto.createHash('md5').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+// Add gender column to orders if it doesn't exist yet (one-time migration)
+try { db.exec(`ALTER TABLE orders ADD COLUMN gender TEXT DEFAULT ''`); } catch(e) {}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_gender ON orders(gender)`);
+
 // Insert orders
 const insertOrder = db.prepare(`
   INSERT OR IGNORE INTO orders
   (identifier, purchase_month, purchase_date, purchase_week, brand, amazon_order_id,
-   order_status, product_name, sku, asin, item_status, quantity, item_price, item_tax, row_hash)
+   order_status, product_name, sku, asin, item_status, quantity, item_price, item_tax, gender, row_hash)
   VALUES (@identifier, @purchase_month, @purchase_date, @purchase_week, @brand, @amazon_order_id,
-   @order_status, @product_name, @sku, @asin, @item_status, @quantity, @item_price, @item_tax, @row_hash)
+   @order_status, @product_name, @sku, @asin, @item_status, @quantity, @item_price, @item_tax, @gender, @row_hash)
 `);
 
 // Insert returns
@@ -211,6 +215,38 @@ function backfillReturnGender() {
 }
 backfillReturnGender(); // run on startup
 
+// Fill gender for orders rows that have a blank gender column.
+// Uses the same patterns as inferGender() / backfillReturnGender().
+function backfillOrderGender() {
+  try {
+    const blankGender = `(gender IS NULL OR gender = '' OR gender = 'Unknown')`;
+    const patternWhere = `(
+      product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%' OR product_name LIKE '% (W)%'
+      OR product_name LIKE '%Girls%'
+      OR product_name LIKE '%Men''s%'  OR product_name LIKE '%Mens%'
+      OR product_name LIKE '%Boys%'
+      OR product_name LIKE '% (M)%'
+    )`;
+    const genderCase = `CASE
+      WHEN product_name LIKE '%Women''s%' OR product_name LIKE '%Womens%'
+        OR product_name LIKE '% (W)%'                          THEN 'Women'
+      WHEN product_name LIKE '%Girls%'                          THEN 'Girls'
+      WHEN product_name LIKE '%Men''s%' OR product_name LIKE '%Mens%'
+                                                                THEN 'Men'
+      WHEN product_name LIKE '%Boys%'                           THEN 'Boys'
+      WHEN product_name LIKE '% (M)%'                           THEN 'Men'
+      ELSE ''
+    END`;
+    const r = db.prepare(`UPDATE orders SET gender = ${genderCase} WHERE ${blankGender} AND ${patternWhere}`).run();
+    if (r.changes > 0) console.log(`[backfill] orders gender: ${r.changes} rows`);
+    return r.changes;
+  } catch(e) {
+    console.error('[backfill] orders gender error:', e.message);
+    return 0;
+  }
+}
+backfillOrderGender(); // run on startup
+
 // Returns the canonical KNOWN_BRANDS spelling for a brand (case-insensitive match).
 // E.g. "SOREL" → "Sorel", "hoka" → "HOKA", "merrell" → "Merrell".
 // Falls back to the original string trimmed if not in the list.
@@ -323,13 +359,14 @@ function buildOrderRecord(row) {
     brand,
     amazon_order_id: String(row['amazon-order-id'] || '').trim(),
     order_status: String(row['order-status'] || '').trim(),
-    product_name: String(row['product-name'] || '').trim(),
+    product_name: productName,
     sku: String(row['sku'] || '').trim(),
     asin: String(row['asin'] || '').trim(),
     item_status: String(row['item-status'] || '').trim(),
     quantity: parseNum(row['quantity']) || 0,
     item_price: parseNum(row['item-price']),
     item_tax: parseNum(row['item-tax']),
+    gender: inferGender('', productName),
     row_hash: hash(row['Identifier'] || row['Duplicate Id'] || '', row['asin'] || '', row['purchase-date'] || row['Purchase Date2'] || '', row['item-price'] || ''),
   };
 }
@@ -553,6 +590,7 @@ async function processFileAsync(filePath, dataType, uploadedBy, filename, jobId)
 
     invalidateFiltersCache(); // new data means filters may have changed
     backfillReturnGender();   // fill gender for any newly added returns with blank gender
+    backfillOrderGender();    // fill gender for any newly added orders with blank gender
     job.status = 'done';
     job.ordersAdded = ordersAdded; job.ordersSkipped = ordersSkipped;
     job.returnsAdded = returnsAdded; job.returnsSkipped = returnsSkipped;
@@ -1000,38 +1038,61 @@ app.get('/api/gender-breakdown', (req, res) => {
 
   const hasFilters = !!(since || month || week || year || brand || style);
 
+  // Bucket expression: collapse Girls→Other, Boys→Other, blank→Other
+  const BUCKET = (col) => `CASE WHEN ${col} = 'Men' THEN 'Men' WHEN ${col} = 'Women' THEN 'Women' ELSE 'Other' END`;
+
   try {
-    // When no filters are active, count ALL returns directly — no join needed and no
-    // exclusions from unmatched order records.  This makes the gender total equal the
-    // dashboard total (46,177) rather than the lower joined total (45,447).
-    // When filters ARE active, join orders to apply date / brand constraints.
-    let rows;
+    // ── Orders (sales) by gender bucket ─────────────────────────────────────
+    // Plain orders filter (no alias needed — single table)
+    const plainClauses = [`order_status != 'On Trial'`];
+    const plainParams  = [];
+    if (since) { plainClauses.push(`purchase_date >= ?`);                   plainParams.push(since); }
+    if (month) { plainClauses.push(`strftime('%Y-%m', purchase_date) = ?`); plainParams.push(month); }
+    if (week)  { plainClauses.push(`purchase_week = ?`);                    plainParams.push(week);  }
+    if (year)  { plainClauses.push(`strftime('%Y', purchase_date) = ?`);    plainParams.push(year);  }
+    if (brand) { plainClauses.push(`brand = ?`);                            plainParams.push(brand); }
+    if (style) { plainClauses.push(`product_name LIKE ?`);                  plainParams.push(`%${style}%`); }
+    const plainWhere = plainClauses.join(' AND ');
+
+    const orderRows = db.prepare(`
+      SELECT ${BUCKET('gender')} AS g, SUM(quantity) AS qty
+      FROM orders WHERE ${plainWhere} GROUP BY g
+    `).all(...plainParams);
+
+    // ── Returns by gender bucket ─────────────────────────────────────────────
+    // No-filter path: count all returns directly (avoids excluding unmatched returns)
+    let returnRows;
     if (!hasFilters) {
-      rows = db.prepare(`
-        SELECT ${GENDER_EXPR} AS gender, SUM(r.quantity) AS returns_qty
-        FROM returns r
-        GROUP BY gender
-        ORDER BY returns_qty DESC
+      returnRows = db.prepare(`
+        SELECT ${BUCKET(`CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Other' ELSE r.gender END`)} AS g,
+               SUM(r.quantity) AS qty
+        FROM returns r GROUP BY g
       `).all();
     } else {
-      rows = db.prepare(`
-        SELECT ${GENDER_EXPR} AS gender, SUM(r.quantity) AS returns_qty
+      returnRows = db.prepare(`
+        SELECT ${BUCKET(`CASE WHEN r.gender IS NULL OR r.gender = '' THEN 'Other' ELSE r.gender END`)} AS g,
+               SUM(r.quantity) AS qty
         FROM returns r
         JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
-        WHERE ${oWhere}
-        GROUP BY gender
-        ORDER BY returns_qty DESC
+        WHERE ${oWhere} GROUP BY g
       `).all(...oParams);
     }
 
-    const total = rows.reduce((s, r) => s + r.returns_qty, 0);
-    rows.forEach(r => { r.pct = total > 0 ? +(r.returns_qty / total * 100).toFixed(1) : 0; });
+    // ── Merge into the three fixed buckets ──────────────────────────────────
+    const ordMap = Object.fromEntries(orderRows.map(r => [r.g, r.qty]));
+    const retMap = Object.fromEntries(returnRows.map(r => [r.g, r.qty]));
+    const buckets = ['Men', 'Women', 'Other'].map(g => {
+      const orders  = ordMap[g]  || 0;
+      const returns = retMap[g]  || 0;
+      const rate    = orders > 0 ? +(returns / orders * 100).toFixed(1) : null;
+      return { gender: g, orders_qty: orders, returns_qty: returns, return_rate: rate };
+    });
 
-    // Put Unknown at the end if present
-    const known   = rows.filter(r => r.gender !== 'Unknown');
-    const unknown = rows.filter(r => r.gender === 'Unknown');
+    const totalOrders  = buckets.reduce((s, b) => s + b.orders_qty,  0);
+    const totalReturns = buckets.reduce((s, b) => s + b.returns_qty, 0);
+    const totalRate    = totalOrders > 0 ? +(totalReturns / totalOrders * 100).toFixed(1) : null;
 
-    res.json({ genders: [...known, ...unknown], total });
+    res.json({ buckets, total: { orders_qty: totalOrders, returns_qty: totalReturns, return_rate: totalRate } });
   } catch(e) {
     console.error('gender-breakdown error:', e.message);
     res.status(500).json({ error: e.message });
