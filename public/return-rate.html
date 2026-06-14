@@ -721,41 +721,37 @@ function renderModalDetail(name, type, d) {
   }
 
   // ── Gender Breakdown ──
-  if (genders && genders.filter(g => g.gender !== 'Unknown').length) {
-    const colorMap = {
-      'Women': { bg:'#fce7f3', text:'#9d174d', bar:'#ec4899' },
-      'Men':   { bg:'#dbeafe', text:'#1e40af', bar:'#3b82f6' },
-      'Boys':  { bg:'#e0f2fe', text:'#075985', bar:'#0ea5e9' },
-      'Girls': { bg:'#fdf4ff', text:'#7e22ce', bar:'#a855f7' },
-    };
-    const defaultColor = { bg:'#f3f4f6', text:'#374151', bar:'#9ca3af' };
-    const maxG = Math.max(...genders.map(g => g.returns_qty));
+  if (genders && genders.length) {
+    const colorMap = { 'Men':'#1e40af', 'Women':'#9d174d', 'Other':'#374151', 'Total':'#111827' };
+    const rateColor = r => r == null ? 'var(--text-muted)' : r >= 25 ? '#e53e3e' : r >= 15 ? '#dd6b20' : r >= 5 ? '#d69e2e' : '#38a169';
+    const cols = [...genders, { gender:'Total', ...genderTotal }];
+    const hS = `text-align:right;padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:`;
+    const cS = `text-align:right;padding:7px 12px;font-size:13px`;
+    const lS = `text-align:left;padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)`;
+    const totBorder = `border-left:1px solid var(--border);`;
     html += `<div style="margin-bottom:24px">
       <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;border-bottom:1px solid var(--border);padding-bottom:8px">Gender Breakdown</h3>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">`;
-    genders.forEach(g => {
-      const c = colorMap[g.gender] || defaultColor;
-      html += `<div style="background:${c.bg};color:${c.text};border-radius:8px;padding:8px 14px;text-align:center;min-width:90px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase">${esc(g.gender)}</div>
-        <div style="font-size:18px;font-weight:800">${n(g.returns_qty)}</div>
-        <div style="font-size:11px;font-weight:600;opacity:.8">${g.pct}%</div>
-      </div>`;
-    });
-    html += `</div>`;
-    genders.forEach(g => {
-      const c = colorMap[g.gender] || defaultColor;
-      const w = maxG > 0 ? (g.returns_qty / maxG * 100) : 0;
-      html += `<div style="margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
-          <span style="font-weight:600;color:${c.text}">${esc(g.gender)}</span>
-          <span style="color:var(--text-muted)">${n(g.returns_qty)} units (${g.pct}%)</span>
-        </div>
-        <div style="height:7px;background:var(--border);border-radius:4px">
-          <div style="width:${w}%;height:100%;background:${c.bar};border-radius:4px;transition:width .4s"></div>
-        </div>
-      </div>`;
-    });
-    html += `</div>`;
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="border-bottom:2px solid var(--border)">
+          <th style="${lS}"></th>
+          ${cols.map((c,i) => `<th style="${hS}${colorMap[c.gender]||'var(--text-muted)'};${i===cols.length-1?totBorder:''}">${esc(c.gender)}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="${lS}">Sales</td>
+          ${cols.map((c,i) => `<td style="${cS};font-weight:${i===cols.length-1?700:500};${i===cols.length-1?totBorder:''}">${n(c.orders_qty)}</td>`).join('')}
+        </tr>
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="${lS}">Returns</td>
+          ${cols.map((c,i) => `<td style="${cS};font-weight:${i===cols.length-1?700:500};${i===cols.length-1?totBorder:''}">${n(c.returns_qty)}</td>`).join('')}
+        </tr>
+        <tr>
+          <td style="${lS}">Return Rate</td>
+          ${cols.map((c,i) => `<td style="${cS};font-weight:700;color:${rateColor(c.return_rate)};${i===cols.length-1?totBorder:''}">${c.return_rate != null ? c.return_rate + '%' : '—'}</td>`).join('')}
+        </tr>
+        </tbody>
+      </table></div>
+    </div>`;
   }
 
   // ── Top Returned Styles ──

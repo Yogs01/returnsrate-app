@@ -1184,19 +1184,36 @@ app.get('/api/brand-detail', (req, res) => {
       LIMIT 15
     `).all(...dF.params, ...oF.params);
 
-    // Gender breakdown for this brand/sku/style
-    const genderRows = db.prepare(`
-      SELECT
-        ${GENDER_EXPR} AS gender,
-        SUM(r.quantity) AS returns_qty
+    // Gender breakdown for this brand/sku/style — Sales / Returns / Rate per bucket
+    const BUCKET_EXPR = `CASE WHEN gender = 'Men' THEN 'Men' WHEN gender = 'Women' THEN 'Women' ELSE 'Other' END`;
+
+    // Orders by gender bucket (uses o.gender — unambiguous)
+    const gOrdRows = db.prepare(`
+      SELECT ${BUCKET_EXPR.replace(/gender/g, 'o.gender')} AS g, SUM(o.quantity) AS qty
+      FROM orders o WHERE ${dF.sql} GROUP BY g
+    `).all(...dF.params);
+
+    // Returns by gender bucket (uses r.gender — unambiguous)
+    const gRetRows = db.prepare(`
+      SELECT ${BUCKET_EXPR.replace(/gender/g, 'r.gender')} AS g, SUM(r.quantity) AS qty
       FROM returns r
       JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
-      WHERE ${oF.sql}
-      GROUP BY gender ORDER BY returns_qty DESC
+      WHERE ${oF.sql} GROUP BY g
     `).all(...oF.params);
-    const totalG = genderRows.reduce((s, r) => s + r.returns_qty, 0);
-    genderRows.forEach(r => { r.pct = totalG > 0 ? +(r.returns_qty / totalG * 100).toFixed(1) : 0; });
-    const genders = [...genderRows.filter(r => r.gender !== 'Unknown'), ...genderRows.filter(r => r.gender === 'Unknown')];
+
+    const gOrdMap = Object.fromEntries(gOrdRows.map(r => [r.g, r.qty]));
+    const gRetMap = Object.fromEntries(gRetRows.map(r => [r.g, r.qty]));
+    const genders = ['Men', 'Women', 'Other'].map(g => {
+      const orders_qty  = gOrdMap[g] || 0;
+      const returns_qty = gRetMap[g] || 0;
+      const return_rate = orders_qty > 0 ? +(returns_qty / orders_qty * 100).toFixed(1) : null;
+      return { gender: g, orders_qty, returns_qty, return_rate };
+    }).filter(g => g.orders_qty > 0 || g.returns_qty > 0);
+    const gTotal = {
+      orders_qty:  genders.reduce((s, g) => s + g.orders_qty,  0),
+      returns_qty: genders.reduce((s, g) => s + g.returns_qty, 0),
+    };
+    gTotal.return_rate = gTotal.orders_qty > 0 ? +(gTotal.returns_qty / gTotal.orders_qty * 100).toFixed(1) : null;
 
     // Attach percentage to each reason / disposition
     const totalR = reasons.reduce((s, r) => s + r.qty, 0);
@@ -1211,6 +1228,7 @@ app.get('/api/brand-detail', (req, res) => {
       reasons,
       dispositions,
       genders,
+      genderTotal: gTotal,
       topStyles
     });
   } catch(e) {
