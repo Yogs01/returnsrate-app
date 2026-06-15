@@ -330,6 +330,9 @@ function extractStyleName(productName, brand) {
   // 5b. Strip "Gender Shoes Size N" suffix: "Bondi 8 Mens Shoes Size 9" → "Bondi 8"
   s = s.replace(/\s+(?:Men'?s?|Women'?s?|Kids?'?s?|Boys?|Girls?)\s+Shoes?\s+(?:Size\s+)?\d*(?:[.,]\d+)?\s*$/i, '').trim();
 
+  // 5c. Strip "for Men", "for Women", "for Men and Women" phrase (long Blundstone/Brooks descriptions)
+  s = s.replace(/\s+for\s+(?:Men|Women|Men\s+and\s+Women|Boys|Girls|Kids)\b.*/i, '').trim();
+
   // 6. Strip trailing width/fit words (do this before size so "8.5 Medium" → "8.5" → stripped)
   s = s.replace(/\s+(?:Medium|Narrow|Regular|Wide|Standard|Extra\s+Wide|D\s+Width)\s*$/i, '').trim();
 
@@ -370,8 +373,8 @@ function extractStyleName(productName, brand) {
   let prev = '';
   while (s !== prev) { prev = s; s = s.replace(colorRe, '').trim(); }
 
-  // 12. Strip trailing material/texture words
-  s = s.replace(/\s+(?:Leather|Textile|Mesh|Knit|Fabric|Synthetic|Suede|Nubuck|Canvas|Flyknit|Gore-Tex|GTX)\s*$/i, '').trim();
+  // 12. Strip trailing material/texture and fit-descriptor words
+  s = s.replace(/\s+(?:Leather|Textile|Mesh|Knit|Fabric|Synthetic|Suede|Nubuck|Canvas|Flyknit|Gore-Tex|GTX|Waterproof|Neutral|Supportive|Support|Stability|Cushioned|Cushioning)\s*$/i, '').trim();
 
   // 13. Second pass of category + shoes strip (color/material removal may have exposed them)
   const nocat2 = s.replace(catRe, '').trim();
@@ -1693,7 +1696,7 @@ app.get('/api/brand-styles', (req, res) => {
   const year  = req.query.year  ? String(req.query.year)  : '';
   if (!brand) return res.json({ records: [], total: 0 });
 
-  const clauses = [`order_status != 'On Trial'`, `brand = ?`, `style_name != ''`];
+  const clauses = [`order_status != 'On Trial'`, `brand = ?`, `length(style_name) > 1`];
   const params  = [brand];
   if (since) { clauses.push(`purchase_date >= ?`);                   params.push(since); }
   if (month) { clauses.push(`strftime('%Y-%m', purchase_date) = ?`); params.push(month); }
