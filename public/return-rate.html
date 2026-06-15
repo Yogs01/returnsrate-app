@@ -128,6 +128,26 @@
       </div>
     </div>
 
+    <!-- Brand → Style Drill-down card -->
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-header" style="padding-bottom:0">
+        <span style="font-size:14px;font-weight:700">Brand → Style Breakdown</span>
+        <span style="font-size:12px;color:var(--text-muted)" id="bsSubtitle">search a brand to see returns by style</span>
+      </div>
+      <div class="card-body" style="padding-bottom:14px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="bsInput" placeholder="Search brand…" list="bsDatalist" autocomplete="off"
+            oninput="debounceBrandSearch()"
+            style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;width:220px;outline:none;transition:border-color .15s"
+            onfocus="this.style.borderColor='var(--brand)'" onblur="this.style.borderColor='var(--border)'" />
+          <datalist id="bsDatalist"></datalist>
+          <button onclick="clearBrandSearch()" class="btn btn-outline" style="font-size:12px;padding:7px 12px">Clear</button>
+        </div>
+      </div>
+      <div id="bsStyleTable" style="display:none"></div>
+      <div id="bsGenderTable" style="display:none"></div>
+    </div>
+
     <!-- Main table card -->
     <div class="card">
       <div id="loadingBar"></div>
@@ -286,6 +306,11 @@ async function loadFilters() {
     const bSel = document.getElementById('brandFilter');
     f.brands.forEach(b => {
       const o = document.createElement('option'); o.value = b; o.textContent = b; bSel.appendChild(o);
+    });
+
+    const bsDl = document.getElementById('bsDatalist');
+    f.brands.forEach(b => {
+      const o = document.createElement('option'); o.value = b; bsDl.appendChild(o);
     });
   } catch(e) { console.error(e); }
 }
@@ -784,6 +809,157 @@ function renderModalDetail(name, type, d) {
   }
 
   document.getElementById('modalContent').innerHTML = html;
+}
+
+// ── Brand → Style Drill-down ─────────────────────────────────────────────
+let _bsDebTimer;
+let _bsCurrentBrand = '';
+let _bsCurrentStyle = '';
+
+function debounceBrandSearch() {
+  clearTimeout(_bsDebTimer);
+  _bsDebTimer = setTimeout(loadBrandStyles, 350);
+}
+
+function clearBrandSearch() {
+  document.getElementById('bsInput').value = '';
+  _bsCurrentBrand = '';
+  _bsCurrentStyle = '';
+  document.getElementById('bsStyleTable').style.display  = 'none';
+  document.getElementById('bsGenderTable').style.display = 'none';
+  document.getElementById('bsSubtitle').textContent = 'search a brand to see returns by style';
+}
+
+function bsTimeFilters() {
+  const since = timelineSince(document.getElementById('timelineFilter').value);
+  const month = document.getElementById('monthFilter').value;
+  const weekRaw = document.getElementById('weekFilter').value;
+  let week = '', year = '';
+  if (weekRaw) { try { const w = JSON.parse(weekRaw); week = w.week; year = w.year; } catch(_) {} }
+  return { since, month, week, year };
+}
+
+async function loadBrandStyles() {
+  const input = document.getElementById('bsInput').value.trim();
+  if (!input) { clearBrandSearch(); return; }
+
+  const match = (allFilters.brands || []).find(b => b.toLowerCase() === input.toLowerCase()) || input;
+  _bsCurrentBrand = match;
+  _bsCurrentStyle = '';
+
+  const styleEl  = document.getElementById('bsStyleTable');
+  const genderEl = document.getElementById('bsGenderTable');
+  genderEl.style.display = 'none';
+  styleEl.style.display  = 'block';
+  styleEl.innerHTML = '<div style="padding:20px;text-align:center"><span class="spinner"></span></div>';
+
+  try {
+    const { since, month, week, year } = bsTimeFilters();
+    const qs = new URLSearchParams({ groupBy:'style', brand:match, minOrders:1, sort:'rate', sortDir:'desc', page:1, since, month, week, year });
+    const d = await fetchCached(`/api/return-rate?${qs}`);
+    renderBrandStyleTable(match, d);
+  } catch(e) {
+    styleEl.innerHTML = `<div class="alert alert-error" style="margin:16px">${esc(e.message)}</div>`;
+  }
+}
+
+function renderBrandStyleTable(brand, d) {
+  const styleEl = document.getElementById('bsStyleTable');
+  document.getElementById('bsSubtitle').textContent = `${brand} · ${n(d.total)} styles`;
+
+  if (!d.records?.length) {
+    styleEl.innerHTML = `<div style="padding:12px 28px;color:var(--text-muted);font-size:13px">No styles found for "${esc(brand)}".</div>`;
+    return;
+  }
+
+  const thS  = 'text-align:left;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)';
+  const thSR = 'text-align:right;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)';
+
+  let html = `<div style="overflow-x:auto;border-top:1px solid var(--border)">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:2px solid var(--border)">
+        <th style="${thS};padding-left:28px">Style</th>
+        <th style="${thSR}">Orders</th>
+        <th style="${thSR}">Returns</th>
+        <th style="${thSR};padding-right:28px">Rate</th>
+      </tr></thead>
+      <tbody>`;
+
+  d.records.forEach(r => {
+    const safeName = String(r.name||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    html += `<tr class="bs-row" onclick="loadStyleGender('${safeName}', this)"
+      style="border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s"
+      onmouseover="if(!this.dataset.sel)this.style.background='var(--bg)'"
+      onmouseout="if(!this.dataset.sel)this.style.background=''">
+      <td style="padding:10px 16px 10px 28px;font-weight:500">${esc(r.name)}</td>
+      <td style="padding:10px 16px;text-align:right">${n(r.orders_qty)}</td>
+      <td style="padding:10px 16px;text-align:right">${n(r.returns_qty)}</td>
+      <td style="padding:10px 28px 10px 16px;text-align:right">${rateBadge(r.return_rate)}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  styleEl.innerHTML = html;
+}
+
+async function loadStyleGender(style, rowEl) {
+  _bsCurrentStyle = style;
+
+  document.querySelectorAll('.bs-row').forEach(row => {
+    delete row.dataset.sel;
+    row.style.background = '';
+  });
+  if (rowEl) { rowEl.dataset.sel = '1'; rowEl.style.background = '#eff6ff'; }
+
+  const genderEl = document.getElementById('bsGenderTable');
+  genderEl.style.display = 'block';
+  genderEl.innerHTML = '<div style="padding:16px 28px;text-align:center"><span class="spinner"></span></div>';
+
+  try {
+    const { since, month, week, year } = bsTimeFilters();
+    const qs = new URLSearchParams({ brand:_bsCurrentBrand, style, since, month, week, year });
+    const d = await fetchCached(`/api/brand-detail?${qs}`);
+    renderStyleGender(style, d);
+  } catch(e) {
+    genderEl.innerHTML = `<div class="alert alert-error" style="margin:16px">${esc(e.message)}</div>`;
+  }
+}
+
+function renderStyleGender(style, d) {
+  const genderEl = document.getElementById('bsGenderTable');
+  const { genders, genderTotal } = d;
+
+  if (!genders || !genders.length) {
+    genderEl.innerHTML = `<div style="padding:12px 28px 20px;color:var(--text-muted);font-size:13px">No gender data for this style.</div>`;
+    return;
+  }
+
+  const rateColor = r => r == null ? 'var(--text-muted)' : r >= 25 ? '#e53e3e' : r >= 15 ? '#dd6b20' : r >= 5 ? '#d69e2e' : '#38a169';
+  const colorMap  = { Men:'#1e40af', Women:'#9d174d', Other:'#374151', Total:'#111827' };
+  const rows = [...genders, { gender:'Total', ...genderTotal }];
+  const thS  = 'text-align:right;padding:6px 20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)';
+
+  let html = `<div style="border-top:1px solid var(--border);padding:16px 28px 24px">
+    <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">${esc(style)}</div>
+    <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:2px solid var(--border)">
+        <th style="text-align:left;padding:6px 48px 6px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Gender</th>
+        <th style="${thS}">Orders</th><th style="${thS}">Returns</th><th style="${thS}">Rate</th>
+      </tr></thead>
+      <tbody>`;
+
+  rows.forEach((g, i) => {
+    const isTotal = i === rows.length - 1;
+    html += `<tr style="border-bottom:1px solid var(--border)${isTotal?';border-top:2px solid var(--border)':''}">
+      <td style="padding:9px 48px 9px 0;font-weight:${isTotal?700:600};color:${colorMap[g.gender]||'#374151'}">${esc(g.gender)}</td>
+      <td style="padding:9px 20px;text-align:right;font-weight:${isTotal?700:400}">${n(g.orders_qty)}</td>
+      <td style="padding:9px 20px;text-align:right;font-weight:${isTotal?700:400}">${n(g.returns_qty)}</td>
+      <td style="padding:9px 0 9px 20px;text-align:right;font-weight:700;color:${rateColor(g.return_rate)}">${g.return_rate!=null?g.return_rate+'%':'—'}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div></div>';
+  genderEl.innerHTML = html;
 }
 
 // Init
