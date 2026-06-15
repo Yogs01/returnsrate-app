@@ -1191,11 +1191,14 @@ app.get('/api/brand-detail', (req, res) => {
     // This fixes brands like Blundstone whose product names have no gender keywords
     // but whose returns CSV has explicit "Men"/"Women" values.
     // LEFT JOIN to a deduped return-gender subquery; fall back to o.gender if no return match.
+    const resolvedGender = `
+      CASE WHEN rg.gender IN ('Men','Women') THEN rg.gender
+           WHEN o.gender  IN ('Men','Women') THEN o.gender
+           ELSE '' END`;
     const gOrdRows = db.prepare(`
-      SELECT ${BUCKET_EXPR.replace('gender',
-        `CASE WHEN rg.gender IN ('Men','Women') THEN rg.gender
-              WHEN o.gender IN ('Men','Women') THEN o.gender
-              ELSE '' END`)} AS g,
+      SELECT CASE WHEN ${resolvedGender} = 'Men'   THEN 'Men'
+                  WHEN ${resolvedGender} = 'Women' THEN 'Women'
+                  ELSE 'Other' END AS g,
              SUM(o.quantity) AS qty
       FROM orders o
       LEFT JOIN (
