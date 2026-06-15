@@ -137,7 +137,7 @@
       <div class="card-body" style="padding-bottom:14px">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="text" id="bsInput" placeholder="Search brand…" list="bsDatalist" autocomplete="off"
-            oninput="debounceBrandSearch()"
+            oninput="debounceBrandSearch()" onchange="debounceBrandSearch()"
             style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;width:220px;outline:none;transition:border-color .15s"
             onfocus="this.style.borderColor='var(--brand)'" onblur="this.style.borderColor='var(--border)'" />
           <datalist id="bsDatalist"></datalist>
@@ -426,6 +426,8 @@ async function load(page) {
     updateTopbar(d);
     tableWrap.classList.remove('is-loading');
     tableWrap.classList.add('did-load');
+    // Reload brand drill-down if a brand is selected, so it reflects new filters
+    if (_bsCurrentBrand) loadBrandStyles();
   } catch(e) {
     if (seq !== _loadSeq) return; // stale error — swallow silently
     showError(e.message);

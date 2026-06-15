@@ -230,7 +230,7 @@ async function doUpload(type) {
     btn.innerHTML = mode === 'replace'
       ? '<span class="spinner"></span> Replacing all data…'
       : '<span class="spinner"></span> Importing…';
-    await pollJob(type, data.jobId);
+    await pollJob(type, data.jobId, mode);
 
   } catch(e) {
     document.getElementById(type + 'Alert').innerHTML = `<div class="alert alert-error">❌ ${e.message}</div>`;
@@ -240,7 +240,7 @@ async function doUpload(type) {
   }
 }
 
-async function pollJob(type, jobId) {
+async function pollJob(type, jobId, mode) {
   const btn = document.getElementById(type + 'Btn');
   const bar = document.getElementById(type + 'Bar');
 
@@ -291,7 +291,9 @@ const typeColors = { orders: '#FF9900', returns: '#e53e3e' };
 
 async function loadHistory() {
   const el = document.getElementById('historyBody');
-  const logs = await fetch('/api/uploads').then(r => r.json());
+  let logs;
+  try { logs = await fetch('/api/uploads').then(r => r.json()); }
+  catch(e) { el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">Could not load history.</div>'; return; }
   if (!logs.length) { el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">No uploads yet.</div>'; return; }
   el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;padding:4px">` +
     logs.map(l => {
