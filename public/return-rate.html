@@ -855,8 +855,8 @@ async function loadBrandStyles() {
 
   try {
     const { since, month, week, year } = bsTimeFilters();
-    const qs = new URLSearchParams({ groupBy:'style', brand:match, minOrders:1, sort:'rate', sortDir:'desc', page:1, since, month, week, year });
-    const d = await fetchCached(`/api/return-rate?${qs}`);
+    const qs = new URLSearchParams({ brand: match, since, month, week, year });
+    const d = await fetchCached(`/api/brand-styles?${qs}`);
     renderBrandStyleTable(match, d);
   } catch(e) {
     styleEl.innerHTML = `<div class="alert alert-error" style="margin:16px">${esc(e.message)}</div>`;
@@ -917,7 +917,7 @@ async function loadStyleGender(style, rowEl) {
 
   try {
     const { since, month, week, year } = bsTimeFilters();
-    const qs = new URLSearchParams({ brand:_bsCurrentBrand, style, since, month, week, year });
+    const qs = new URLSearchParams({ brand: _bsCurrentBrand, style_name: style, since, month, week, year });
     const d = await fetchCached(`/api/brand-detail?${qs}`);
     renderStyleGender(style, d);
   } catch(e) {

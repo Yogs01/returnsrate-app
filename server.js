@@ -87,13 +87,17 @@ function fileHash(filePath) {
 try { db.exec(`ALTER TABLE orders ADD COLUMN gender TEXT DEFAULT ''`); } catch(e) {}
 db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_gender ON orders(gender)`);
 
+// Add style_name column to orders (core model name, stripped of brand/color/size)
+try { db.exec(`ALTER TABLE orders ADD COLUMN style_name TEXT DEFAULT ''`); } catch(e) {}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_style_name ON orders(brand, style_name)`);
+
 // Insert orders
 const insertOrder = db.prepare(`
   INSERT OR IGNORE INTO orders
   (identifier, purchase_month, purchase_date, purchase_week, brand, amazon_order_id,
-   order_status, product_name, sku, asin, item_status, quantity, item_price, item_tax, gender, row_hash)
+   order_status, product_name, style_name, sku, asin, item_status, quantity, item_price, item_tax, gender, row_hash)
   VALUES (@identifier, @purchase_month, @purchase_date, @purchase_week, @brand, @amazon_order_id,
-   @order_status, @product_name, @sku, @asin, @item_status, @quantity, @item_price, @item_tax, @gender, @row_hash)
+   @order_status, @product_name, @style_name, @sku, @asin, @item_status, @quantity, @item_price, @item_tax, @gender, @row_hash)
 `);
 
 // Insert returns
@@ -243,6 +247,27 @@ function backfillOrderGender() {
     return 0;
   }
 }
+// Backfill style_name for all orders rows where it is blank.
+// Reads rows in JS and applies extractStyleName() — avoids complex SQLite string manipulation.
+function backfillStyleName() {
+  try {
+    const rows = db.prepare(`SELECT id, product_name, brand FROM orders WHERE style_name IS NULL OR style_name = ''`).all();
+    if (!rows.length) return 0;
+    const upd = db.prepare(`UPDATE orders SET style_name = ? WHERE id = ?`);
+    let changed = 0;
+    db.transaction(() => {
+      for (const row of rows) {
+        const sn = extractStyleName(row.product_name || '', row.brand || '');
+        if (sn) { upd.run(sn, row.id); changed++; }
+      }
+    })();
+    if (changed > 0) console.log(`[backfill] style_name: ${changed} rows`);
+    return changed;
+  } catch(e) {
+    console.error('[backfill] style_name error:', e.message);
+    return 0;
+  }
+}
 // Startup backfills are deferred until after app.listen() so Railway's health
 // check succeeds before the (potentially slow) LIKE-scan migrations run.
 
@@ -256,6 +281,38 @@ function canonicalizeBrand(brand) {
     if (kb.toLowerCase() === lower) return kb;
   }
   return brand.trim();
+}
+
+// Extract the core model/style name from a full Amazon product name.
+// Strips: brand prefix, color/size suffixes (after " - " or " | "), gender markers.
+// E.g. "HOKA Arahi 8 Women's - White/Ice Water" → "Arahi 8"
+//      "Blundstone 500 Series Boot - Brown - Size 9" → "500 Series Boot"
+function extractStyleName(productName, brand) {
+  if (!productName) return '';
+  let s = productName.trim();
+
+  // 1. Strip brand prefix (supplied brand takes priority)
+  if (brand) {
+    const safe = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    s = s.replace(new RegExp(`^${safe}\\s+`, 'i'), '').trim();
+  }
+  // Also try all KNOWN_BRANDS as fallback
+  for (const kb of KNOWN_BRANDS) {
+    if (s.toLowerCase().startsWith(kb.toLowerCase() + ' ')) {
+      s = s.slice(kb.length).trim();
+      break;
+    }
+  }
+
+  // 2. Drop everything from the first " - " or " | " separator onward
+  //    (Amazon uses these to delimit color and size in product listings)
+  const sepIdx = s.search(/\s+-\s+|\s+\|\s+/);
+  if (sepIdx > 0) s = s.slice(0, sepIdx).trim();
+
+  // 3. Strip trailing gender markers
+  s = s.replace(/\s+(?:Women'?s?|Men'?s?|Kids?|Boys?|Girls?|Unisex|\(W\)|\(M\))\s*$/i, '').trim();
+
+  return s || productName.trim();
 }
 
 function extractBrandFromName(productName) {
@@ -359,6 +416,7 @@ function buildOrderRecord(row) {
     amazon_order_id: String(row['amazon-order-id'] || '').trim(),
     order_status: String(row['order-status'] || '').trim(),
     product_name: productName,
+    style_name: extractStyleName(productName, brand),
     sku: String(row['sku'] || '').trim(),
     asin: String(row['asin'] || '').trim(),
     item_status: String(row['item-status'] || '').trim(),
@@ -590,6 +648,7 @@ async function processFileAsync(filePath, dataType, uploadedBy, filename, jobId)
     invalidateFiltersCache(); // new data means filters may have changed
     backfillReturnGender();   // fill gender for any newly added returns with blank gender
     backfillOrderGender();    // fill gender for any newly added orders with blank gender
+    backfillStyleName();      // fill style_name for any newly added orders
     job.status = 'done';
     job.ordersAdded = ordersAdded; job.ordersSkipped = ordersSkipped;
     job.returnsAdded = returnsAdded; job.returnsSkipped = returnsSkipped;
@@ -672,6 +731,7 @@ app.post('/api/import-orders', (req, res) => {
       if (!rec.brand || rec.brand === '-' || rec.brand === '0') {
         rec.brand = extractBrandFromName(rec.product_name || '') || rec.brand || '';
       }
+      if (!rec.style_name) rec.style_name = extractStyleName(rec.product_name || '', rec.brand || '');
       const r = insertOrder.run(rec);
       if (r.changes > 0) added++; else skipped++;
     }
@@ -1102,9 +1162,10 @@ app.get('/api/gender-breakdown', (req, res) => {
 // Returns return reasons, disposition breakdown, and top SKUs for the selected dimension.
 // Respects the same since/month/week/year time filters as /api/return-rate.
 app.get('/api/brand-detail', (req, res) => {
-  const brand = req.query.brand || '';
-  const sku   = req.query.sku   || '';
-  const style = req.query.style || '';
+  const brand      = req.query.brand      || '';
+  const sku        = req.query.sku        || '';
+  const style      = req.query.style      || '';
+  const style_name = req.query.style_name || '';
   const since = req.query.since || '';
   const month = req.query.month || '';
   const week  = req.query.week  ? parseInt(req.query.week) : null;
@@ -1115,9 +1176,10 @@ app.get('/api/brand-detail', (req, res) => {
     const p = prefix ? `${prefix}.` : '';
     const clauses = [`${p}order_status != 'On Trial'`];
     const vals = [];
-    if (brand) { clauses.push(`${p}brand = ?`);                              vals.push(brand); }
-    if (sku)   { clauses.push(`${p}sku = ?`);                                vals.push(sku);   }
-    if (style) { clauses.push(`${p}product_name = ?`);                       vals.push(style); }
+    if (brand)      { clauses.push(`${p}brand = ?`);        vals.push(brand); }
+    if (sku)        { clauses.push(`${p}sku = ?`);          vals.push(sku);   }
+    if (style_name) { clauses.push(`${p}style_name = ?`);   vals.push(style_name); }
+    else if (style) { clauses.push(`${p}product_name = ?`); vals.push(style); }
     if (since) { clauses.push(`${p}purchase_date >= ?`);                     vals.push(since); }
     if (month) { clauses.push(`strftime('%Y-%m', ${p}purchase_date) = ?`);   vals.push(month); }
     if (week)  { clauses.push(`${p}purchase_week = ?`);                      vals.push(week);  }
@@ -1544,12 +1606,58 @@ app.get('/api/debug/gender', (req, res) => {
   res.json({ brand, total, unknown, hasOrder, hasGender, sampleUnknown });
 });
 
+// GET /api/brand-styles — returns styles for a brand grouped by style_name (core model name)
+// Used by the Brand → Style drill-down section on the return-rate page.
+app.get('/api/brand-styles', (req, res) => {
+  const brand = req.query.brand || '';
+  const since = req.query.since || '';
+  const month = req.query.month || '';
+  const week  = req.query.week  ? parseInt(req.query.week) : null;
+  const year  = req.query.year  ? String(req.query.year)  : '';
+  if (!brand) return res.json({ records: [], total: 0 });
+
+  const clauses = [`order_status != 'On Trial'`, `brand = ?`, `style_name != ''`];
+  const params  = [brand];
+  if (since) { clauses.push(`purchase_date >= ?`);                   params.push(since); }
+  if (month) { clauses.push(`strftime('%Y-%m', purchase_date) = ?`); params.push(month); }
+  if (week)  { clauses.push(`purchase_week = ?`);                    params.push(week);  }
+  if (year)  { clauses.push(`strftime('%Y', purchase_date) = ?`);    params.push(year);  }
+  const oWhere = clauses.join(' AND ');
+
+  const rClauses = clauses.map(c => c.replace(/\b(purchase_date|purchase_week|order_status|brand|style_name)\b/g, 'o.$1'));
+  const rWhere   = rClauses.join(' AND ');
+
+  const records = db.prepare(`
+    SELECT
+      oa.style_name        AS name,
+      oa.orders_qty,
+      COALESCE(ra.returns_qty, 0)                                                AS returns_qty,
+      ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)  AS return_rate
+    FROM (
+      SELECT style_name, SUM(quantity) AS orders_qty
+      FROM orders WHERE ${oWhere}
+      GROUP BY style_name
+    ) oa
+    LEFT JOIN (
+      SELECT o.style_name, SUM(r.quantity) AS returns_qty
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+      WHERE ${rWhere}
+      GROUP BY o.style_name
+    ) ra ON ra.style_name = oa.style_name
+    ORDER BY return_rate DESC, returns_qty DESC
+  `).all(...params, ...params);
+
+  res.json({ records, total: records.length });
+});
+
 const server = app.listen(PORT, () => {
   console.log(`\n✅ Orders & Returns App running at http://localhost:${PORT}\n`);
   // Run backfills after the server is up so Railway's health check succeeds first
   setImmediate(() => {
     backfillReturnGender();
     backfillOrderGender();
+    backfillStyleName();
   });
 });
 server.setTimeout(600000); // 10 minutes for large uploads
