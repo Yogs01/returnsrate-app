@@ -1187,10 +1187,25 @@ app.get('/api/brand-detail', (req, res) => {
     // Gender breakdown for this brand/sku/style — Sales / Returns / Rate per bucket
     const BUCKET_EXPR = `CASE WHEN gender = 'Men' THEN 'Men' WHEN gender = 'Women' THEN 'Women' ELSE 'Other' END`;
 
-    // Orders by gender bucket (uses o.gender — unambiguous)
+    // Orders by gender: prefer the matched return's gender over orders.gender.
+    // This fixes brands like Blundstone whose product names have no gender keywords
+    // but whose returns CSV has explicit "Men"/"Women" values.
+    // LEFT JOIN to a deduped return-gender subquery; fall back to o.gender if no return match.
     const gOrdRows = db.prepare(`
-      SELECT ${BUCKET_EXPR.replace(/gender/g, 'o.gender')} AS g, SUM(o.quantity) AS qty
-      FROM orders o WHERE ${dF.sql} GROUP BY g
+      SELECT ${BUCKET_EXPR.replace('gender',
+        `CASE WHEN rg.gender IN ('Men','Women') THEN rg.gender
+              WHEN o.gender IN ('Men','Women') THEN o.gender
+              ELSE '' END`)} AS g,
+             SUM(o.quantity) AS qty
+      FROM orders o
+      LEFT JOIN (
+        SELECT r.order_id, r.sku,
+          CASE WHEN SUM(CASE WHEN r.gender = 'Men'   THEN 1 ELSE 0 END) > 0 THEN 'Men'
+               WHEN SUM(CASE WHEN r.gender = 'Women' THEN 1 ELSE 0 END) > 0 THEN 'Women'
+               ELSE '' END AS gender
+        FROM returns r GROUP BY r.order_id, r.sku
+      ) rg ON rg.order_id = o.amazon_order_id AND rg.sku = o.sku
+      WHERE ${dF.sql} GROUP BY g
     `).all(...dF.params);
 
     // Returns by gender bucket (uses r.gender — unambiguous)
