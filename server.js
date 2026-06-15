@@ -247,21 +247,21 @@ function backfillOrderGender() {
     return 0;
   }
 }
-// Backfill style_name for all orders rows where it is blank.
-// Reads rows in JS and applies extractStyleName() — avoids complex SQLite string manipulation.
+// Re-compute style_name for every order row using the latest extractStyleName logic.
+// Only writes to DB when the value actually changes, so subsequent startups are fast.
 function backfillStyleName() {
   try {
-    const rows = db.prepare(`SELECT id, product_name, brand FROM orders WHERE style_name IS NULL OR style_name = ''`).all();
+    const rows = db.prepare(`SELECT id, product_name, brand, style_name FROM orders`).all();
     if (!rows.length) return 0;
     const upd = db.prepare(`UPDATE orders SET style_name = ? WHERE id = ?`);
     let changed = 0;
     db.transaction(() => {
       for (const row of rows) {
         const sn = extractStyleName(row.product_name || '', row.brand || '');
-        if (sn) { upd.run(sn, row.id); changed++; }
+        if (sn !== (row.style_name || '')) { upd.run(sn, row.id); changed++; }
       }
     })();
-    if (changed > 0) console.log(`[backfill] style_name: ${changed} rows`);
+    if (changed > 0) console.log(`[backfill] style_name: ${changed} rows updated`);
     return changed;
   } catch(e) {
     console.error('[backfill] style_name error:', e.message);
@@ -284,33 +284,82 @@ function canonicalizeBrand(brand) {
 }
 
 // Extract the core model/style name from a full Amazon product name.
-// Strips: brand prefix, color/size suffixes (after " - " or " | "), gender markers.
-// E.g. "HOKA Arahi 8 Women's - White/Ice Water" → "Arahi 8"
-//      "Blundstone 500 Series Boot - Brown - Size 9" → "500 Series Boot"
+// Handles the real-world Amazon listing formats seen in this dataset:
+//   "HOKA ONE ONE Men's Running Shoes, Nimbus Cloud, 10 US" → "Running Shoes"
+//   "Men's Rincon 4 White/White 8.5 Medium"                 → "Rincon 4"
+//   "HOKA Arahi 8 Women's - White/Ice Water"                → "Arahi 8"
+//   "ONE ONE Mens Bondi 8 Textile White White Trainers 9 US"→ "Bondi 8"
+//   "Women's Speedgoat 6 Outer Orbit/Stardust 6 Medium"     → "Speedgoat 6"
 function extractStyleName(productName, brand) {
   if (!productName) return '';
   let s = productName.trim();
 
-  // 1. Strip brand prefix (supplied brand takes priority)
+  // Strip leading "- " prefix (some marketplace listings start with this)
+  s = s.replace(/^-\s+/, '').trim();
+
+  // 1. Strip brand prefix
   if (brand) {
     const safe = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     s = s.replace(new RegExp(`^${safe}\\s+`, 'i'), '').trim();
   }
-  // Also try all KNOWN_BRANDS as fallback
   for (const kb of KNOWN_BRANDS) {
     if (s.toLowerCase().startsWith(kb.toLowerCase() + ' ')) {
-      s = s.slice(kb.length).trim();
-      break;
+      s = s.slice(kb.length).trim(); break;
     }
   }
+  // Strip secondary brand qualifiers ("ONE ONE" from "HOKA ONE ONE")
+  s = s.replace(/^ONE\s+ONE\s+/i, '').trim();
 
-  // 2. Drop everything from the first " - " or " | " separator onward
-  //    (Amazon uses these to delimit color and size in product listings)
-  const sepIdx = s.search(/\s+-\s+|\s+\|\s+/);
-  if (sepIdx > 0) s = s.slice(0, sepIdx).trim();
+  // 2. Strip LEADING gender marker ("Men's Clifton 10" → "Clifton 10")
+  s = s.replace(/^(Women'?s?|Men'?s?|Kids?'?s?|Boys?|Girls?|Unisex)\s+/i, '').trim();
 
-  // 3. Strip trailing gender markers
-  s = s.replace(/\s+(?:Women'?s?|Men'?s?|Kids?|Boys?|Girls?|Unisex|\(W\)|\(M\))\s*$/i, '').trim();
+  // 3. Split on first comma — Amazon UK/intl format: "Style, Color, Size"
+  const ci = s.indexOf(',');
+  if (ci > 1) s = s.slice(0, ci).trim();
+
+  // 4. Split on " - " or " | " separators
+  const si = s.search(/\s+-\s+|\s+\|\s+/);
+  if (si > 0) s = s.slice(0, si).trim();
+
+  // 5. Strip TRAILING gender markers
+  s = s.replace(/\s+(Women'?s?|Men'?s?|Kids?'?s?|Boys?|Girls?|Unisex|\(W\)|\(M\))\s*$/i, '').trim();
+
+  // 6. Strip trailing width/fit words (do this before size so "8.5 Medium" → "8.5" → stripped)
+  s = s.replace(/\s+(?:Medium|Narrow|Regular|Wide|Standard|Extra\s+Wide|D\s+Width)\s*$/i, '').trim();
+
+  // 7. Strip trailing size with explicit unit: "9 US", "10 UK", "44 EU", "Size 9"
+  s = s.replace(/\s+(?:Size\s+)?\d+(?:[.,]\d+)?\s*(?:US(?:\s+(?:Men'?s?|Women'?s?))?|UK|EU|AU|CM)\s*$/i, '').trim();
+
+  // 8. Strip trailing decimal number (shoe sizes: 8.5, 9.5 — version numbers are whole)
+  s = s.replace(/\s+\d+\.\d+\s*$/i, '').trim();
+
+  // 9. Strip trailing shoe category words (only when something non-empty remains after).
+  //    No standalone "Shoes?" — that would eat the "Shoes" from "Running Shoes" alone.
+  const catRe = /\s+(?:(?:Road\s+|Trail\s+|Hiking\s+|Walking\s+|Athletic\s+)?Running\s+Shoes?|Trail\s+Shoes?|Road\s+Shoes?|Hiking\s+Shoes?|Walking\s+Shoes?|Sneaker[s]?|Trainer[s]?|Athletic|Footwear)\s*$/i;
+  const nocat = s.replace(catRe, '').trim();
+  if (nocat) s = nocat;
+
+  // 10. Strip slash-color pattern + 0-1 ALPHA word before it + everything after.
+  //     Pre-slash word is [A-Za-z]+ (not \S+) so numeric version numbers are preserved:
+  //     "Rincon 4 White/White"             → "Rincon 4"  (not "Rincon")
+  //     "Speedgoat 6 Outer Orbit/Stardust" → "Speedgoat 6"
+  s = s.replace(/\s+(?:[A-Za-z]+\s+)?\S+\/\S+(\s+\S+)*$/, '').trim();
+
+  // 11. Strip trailing common color words (loop for stacked colors like "White White")
+  const colorRe = /\s+(?:White|Black|Grey|Gray|Blue|Red|Green|Pink|Brown|Navy|Beige|Cream|Yellow|Purple|Orange|Silver|Gold|Coral|Ivory|Bone|Sand|Tan|Olive|Mint|Lilac|Rose|Burgundy|Charcoal|Taupe|Khaki|Teal|Rust|Midnight|Stone|Oat|Latte|Dune|Cloud|Walnut|Mocha|Chalk|Fog|Sky|Slate|Onyx|Forest|Sage|Ember|Ocean)\s*$/i;
+  let prev = '';
+  while (s !== prev) { prev = s; s = s.replace(colorRe, '').trim(); }
+
+  // 12. Strip trailing material/texture words
+  s = s.replace(/\s+(?:Leather|Textile|Mesh|Knit|Fabric|Synthetic|Suede|Nubuck|Canvas|Flyknit|Gore-Tex|GTX)\s*$/i, '').trim();
+
+  // 13. Second pass of category strip (color/material removal may have exposed them)
+  const nocat2 = s.replace(catRe, '').trim();
+  if (nocat2) s = nocat2;
+
+  // 14. Final trailing gender strip (exposed after category/color removal,
+  //     e.g. "Glycerin 21 Men's Road Running Shoe" → after step 13 "Glycerin 21 Men's" → "Glycerin 21")
+  s = s.replace(/\s+(Women'?s?|Men'?s?|Kids?'?s?|Boys?|Girls?|Unisex|\(W\)|\(M\))\s*$/i, '').trim();
 
   return s || productName.trim();
 }
