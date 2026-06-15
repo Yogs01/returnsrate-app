@@ -373,8 +373,9 @@ function extractStyleName(productName, brand) {
   let prev = '';
   while (s !== prev) { prev = s; s = s.replace(colorRe, '').trim(); }
 
-  // 12. Strip trailing material/texture and fit-descriptor words
-  s = s.replace(/\s+(?:Leather|Textile|Mesh|Knit|Fabric|Synthetic|Suede|Nubuck|Canvas|Flyknit|Gore-Tex|GTX|Waterproof|Neutral|Supportive|Support|Stability|Cushioned|Cushioning)\s*$/i, '').trim();
+  // 12. Strip trailing material/texture and fit-descriptor words (loop — "GTX Waterproof" needs two passes)
+  const matRe = /\s+(?:Leather|Textile|Mesh|Knit|Fabric|Synthetic|Suede|Nubuck|Canvas|Flyknit|Gore-Tex|GTX|Waterproof|Neutral|Supportive|Support|Stability|Cushioned|Cushioning)\s*$/i;
+  prev = ''; while (s !== prev) { prev = s; s = s.replace(matRe, '').trim(); }
 
   // 13. Second pass of category + shoes strip (color/material removal may have exposed them)
   const nocat2 = s.replace(catRe, '').trim();
