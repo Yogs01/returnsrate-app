@@ -817,6 +817,10 @@ function renderModalDetail(name, type, d) {
 let _bsDebTimer;
 let _bsCurrentBrand = '';
 let _bsCurrentStyle = '';
+let _bsRecords = [];
+let _bsSortKey = 'return_rate';
+let _bsSortDir = 'desc';
+let _bsStyleFilterTimer;
 
 function debounceBrandSearch() {
   clearTimeout(_bsDebTimer);
@@ -868,26 +872,80 @@ async function loadBrandStyles() {
 function renderBrandStyleTable(brand, d) {
   const styleEl = document.getElementById('bsStyleTable');
   document.getElementById('bsSubtitle').textContent = `${brand} · ${n(d.total)} styles`;
+  _bsRecords = d.records || [];
 
-  if (!d.records?.length) {
+  if (!_bsRecords.length) {
     styleEl.innerHTML = `<div style="padding:12px 28px;color:var(--text-muted);font-size:13px">No styles found for "${esc(brand)}".</div>`;
     return;
   }
 
-  const thS  = 'text-align:left;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)';
-  const thSR = 'text-align:right;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)';
+  styleEl.innerHTML = `
+    <div style="padding:10px 28px;border-top:1px solid var(--border)">
+      <input type="text" id="bsStyleFilter" placeholder="Search style…" autocomplete="off"
+        oninput="filterBsStyles()"
+        style="width:100%;max-width:280px;padding:6px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px" />
+    </div>
+    <div id="bsTableContainer"></div>`;
+  renderBsTable();
+}
 
-  let html = `<div style="overflow-x:auto;border-top:1px solid var(--border)">
+function bsSortIndicator(key) {
+  if (_bsSortKey !== key) return '';
+  return _bsSortDir === 'asc' ? ' ▲' : ' ▼';
+}
+
+function bsSortBy(key) {
+  if (_bsSortKey === key) {
+    _bsSortDir = _bsSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _bsSortKey = key;
+    _bsSortDir = key === 'name' ? 'asc' : 'desc';
+  }
+  renderBsTable();
+}
+
+function filterBsStyles() {
+  clearTimeout(_bsStyleFilterTimer);
+  _bsStyleFilterTimer = setTimeout(renderBsTable, 150);
+}
+
+function renderBsTable() {
+  const container = document.getElementById('bsTableContainer');
+  if (!container) return;
+
+  const filterInput = document.getElementById('bsStyleFilter');
+  const filterVal = (filterInput?.value || '').trim().toLowerCase();
+  let rows = _bsRecords;
+  if (filterVal) rows = rows.filter(r => String(r.name||'').toLowerCase().includes(filterVal));
+
+  rows = rows.slice().sort((a, b) => {
+    let av, bv;
+    if (_bsSortKey === 'name') { av = String(a.name||'').toLowerCase(); bv = String(b.name||'').toLowerCase(); }
+    else { av = a[_bsSortKey] ?? 0; bv = b[_bsSortKey] ?? 0; }
+    if (av < bv) return _bsSortDir === 'asc' ? -1 : 1;
+    if (av > bv) return _bsSortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const thS  = 'text-align:left;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);cursor:pointer;user-select:none';
+  const thSR = 'text-align:right;padding:8px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);cursor:pointer;user-select:none';
+
+  if (!rows.length) {
+    container.innerHTML = `<div style="padding:12px 28px;color:var(--text-muted);font-size:13px">No styles match your search.</div>`;
+    return;
+  }
+
+  let html = `<div style="overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="border-bottom:2px solid var(--border)">
-        <th style="${thS};padding-left:28px">Style</th>
-        <th style="${thSR}">Orders</th>
-        <th style="${thSR}">Returns</th>
-        <th style="${thSR};padding-right:28px">Rate</th>
+        <th style="${thS};padding-left:28px" onclick="bsSortBy('name')">Style${bsSortIndicator('name')}</th>
+        <th style="${thSR}" onclick="bsSortBy('orders_qty')">Orders${bsSortIndicator('orders_qty')}</th>
+        <th style="${thSR}" onclick="bsSortBy('returns_qty')">Returns${bsSortIndicator('returns_qty')}</th>
+        <th style="${thSR};padding-right:28px" onclick="bsSortBy('return_rate')">Rate${bsSortIndicator('return_rate')}</th>
       </tr></thead>
       <tbody>`;
 
-  d.records.forEach(r => {
+  rows.forEach(r => {
     const safeName = String(r.name||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     html += `<tr class="bs-row" onclick="loadStyleGender('${safeName}', this)"
       style="border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s"
@@ -901,7 +959,7 @@ function renderBrandStyleTable(brand, d) {
   });
 
   html += '</tbody></table></div>';
-  styleEl.innerHTML = html;
+  container.innerHTML = html;
 }
 
 async function loadStyleGender(style, rowEl) {
