@@ -111,23 +111,21 @@ async function loadReturns(page=1) {
     </tr>`).join('')
     : '<tr><td colspan="9" class="text-center" style="padding:32px;color:var(--text-muted)">No records found.</td></tr>';
 
-  renderPagination(d.page, d.pages, loadReturns);
+  renderPagination(d.page, d.pages);
 }
 
-function renderPagination(current, total, fn) {
+function renderPagination(current, total) {
   const el = document.getElementById('pagination');
   if (total <= 1) { el.innerHTML=''; return; }
-  let html = `<button ${current===1?'disabled':''} onclick="fn(${current-1})">← Prev</button>`;
+  let html = `<button ${current===1?'disabled':''} onclick="loadReturns(${current-1})">← Prev</button>`;
   let start = Math.max(1, current-2), end = Math.min(total, start+4);
   if (end-start<4) start=Math.max(1,end-4);
-  if (start>1) html+=`<button onclick="fn(1)">1</button><span style="padding:0 4px">…</span>`;
-  for(let i=start;i<=end;i++) html+=`<button class="${i===current?'active':''}" onclick="fn(${i})">${i}</button>`;
-  if(end<total) html+=`<span style="padding:0 4px">…</span><button onclick="fn(${total})">${total}</button>`;
-  html+=`<button ${current===total?'disabled':''} onclick="fn(${current+1})">Next →</button>`;
+  if (start>1) html+=`<button onclick="loadReturns(1)">1</button><span style="padding:0 4px">…</span>`;
+  for(let i=start;i<=end;i++) html+=`<button class="${i===current?'active':''}" onclick="loadReturns(${i})">${i}</button>`;
+  if(end<total) html+=`<span style="padding:0 4px">…</span><button onclick="loadReturns(${total})">${total}</button>`;
+  html+=`<button ${current===total?'disabled':''} onclick="loadReturns(${current+1})">Next →</button>`;
   html+=`<span class="page-info">Page ${current} of ${total}</span>`;
   el.innerHTML = html;
-  // make fn accessible
-  window.fn = fn;
 }
 
 function clearFilters() {

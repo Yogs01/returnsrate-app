@@ -61,6 +61,8 @@
 <script>
 const fmt = n => n == null ? '—' : '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 const fmtPct = (ret, ord) => ord > 0 ? ((ret/ord)*100).toFixed(1)+'%' : '—';
+const ML = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const mLabel = s => { if (!s) return ''; const m = s.match(/^(\d{4})-(\d{2})$/); if (!m) return s; return (ML[+m[2]-1]||m[2]) + " '" + m[1].slice(2); };
 let monthlyData = [];
 
 async function load() {
@@ -68,7 +70,7 @@ async function load() {
   monthlyData = d.monthly;
   const all = d.monthly;
 
-  const labels = all.map(m => m.month?.replace(/-\d{4}/,'') || m.month);
+  const labels = all.map(m => mLabel(m.month));
 
   new Chart(document.getElementById('ordersChart'), {
     type: 'bar',
@@ -113,7 +115,7 @@ async function load() {
   const tbody = document.getElementById('monthlyBody');
   tbody.innerHTML = [...all].reverse().map(m => `
     <tr>
-      <td style="font-weight:500">${m.month||'—'}</td>
+      <td style="font-weight:500">${mLabel(m.month)||m.month||'—'}</td>
       <td class="text-right">${(m.orders||0).toLocaleString()}</td>
       <td class="text-right">${(m.units||0).toLocaleString()}</td>
       <td class="text-right amount-positive">${fmt(m.revenue)}</td>

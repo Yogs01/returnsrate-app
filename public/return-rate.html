@@ -883,7 +883,8 @@ function renderBrandStyleTable(brand, d) {
     <div style="padding:10px 28px;border-top:1px solid var(--border)">
       <input type="text" id="bsStyleFilter" placeholder="Search style…" autocomplete="off"
         oninput="filterBsStyles()"
-        style="width:100%;max-width:280px;padding:6px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px" />
+        onfocus="this.style.borderColor='var(--brand)'" onblur="this.style.borderColor='var(--border)'"
+        style="width:100%;max-width:280px;padding:6px 10px;font-size:13px;border:1.5px solid var(--border);border-radius:6px;outline:none;transition:border-color .15s" />
     </div>
     <div id="bsTableContainer"></div>`;
   renderBsTable();
@@ -918,12 +919,12 @@ async function toggleStyleProducts(styleName, btn) {
   if (existing) {
     const isThis = existing.dataset.style === styleName;
     existing.remove();
-    tbody.querySelectorAll('.bs-expand-btn').forEach(b => { b.textContent = '▶'; b.style.background = 'var(--border)'; });
+    tbody.querySelectorAll('.bs-expand-btn').forEach(b => { b.textContent = '▶'; b.style.background = 'var(--border)'; b.style.color = 'var(--text-muted)'; });
     if (isThis) return;
   }
 
   btn.textContent = '▼';
-  btn.style.background = 'var(--primary, #3b82f6)';
+  btn.style.background = '#3b82f6';
   btn.style.color = '#fff';
 
   const loadingRow = document.createElement('tr');
@@ -1039,12 +1040,22 @@ async function loadStyleGender(style, rowEl) {
   }
 }
 
+function closeStyleGender() {
+  const genderEl = document.getElementById('bsGenderTable');
+  genderEl.style.display = 'none';
+  _bsCurrentStyle = '';
+  document.querySelectorAll('.bs-row').forEach(row => { delete row.dataset.sel; row.style.background = ''; });
+}
+
 function renderStyleGender(style, d) {
   const genderEl = document.getElementById('bsGenderTable');
   const { genders, genderTotal } = d;
 
   if (!genders || !genders.length) {
-    genderEl.innerHTML = `<div style="padding:12px 28px 20px;color:var(--text-muted);font-size:13px">No gender data for this style.</div>`;
+    genderEl.innerHTML = `<div style="padding:12px 28px 20px;display:flex;align-items:center;justify-content:space-between">
+      <span style="color:var(--text-muted);font-size:13px">No gender data for this style.</span>
+      <button onclick="closeStyleGender()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);line-height:1">×</button>
+    </div>`;
     return;
   }
 
@@ -1054,7 +1065,10 @@ function renderStyleGender(style, d) {
   const thS  = 'text-align:right;padding:6px 20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)';
 
   let html = `<div style="border-top:1px solid var(--border);padding:16px 28px 24px">
-    <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">${esc(style)}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">${esc(style)}</div>
+      <button onclick="closeStyleGender()" title="Close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);line-height:1;padding:0">×</button>
+    </div>
     <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:13px">
       <thead><tr style="border-bottom:2px solid var(--border)">
         <th style="text-align:left;padding:6px 48px 6px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)">Gender</th>
