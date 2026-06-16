@@ -307,10 +307,15 @@ function extractStyleName(productName, brand) {
       s = s.slice(kb.length).trim(); break;
     }
   }
-  // Strip secondary brand qualifiers ("ONE ONE" from "HOKA ONE ONE")
-  s = s.replace(/^ONE\s+ONE\s+/i, '').trim();
+  // Strip secondary brand qualifiers ("ONE ONE" or "ONE ONE ONE" from "HOKA ONE ONE...")
+  s = s.replace(/^(?:ONE\s+){1,3}/i, '').trim();
 
   // After brand stripping, clean up any leading non-alphanumeric junk (e.g. lone "|")
+  s = s.replace(/^[^A-Za-z0-9(]+/, '').trim();
+
+  // 1b. Strip Spanish shoe-type prefix + optional "de correr/Carrera/bajos" + optional
+  //     "para Hombre/Mujer": "Zapatillas Speedgoat 6 para Mujer" → "Speedgoat 6"
+  s = s.replace(/^(?:Zapatillas|Zapatos|Sandalias|Tenis)(?:\s+(?:de\s+(?:correr|Carrera)|bajos?))?\s*(?:para\s+(?:Hombres?|Mujeres?|Ni[ñn]os?|Ni[ñn]as?)\s*)?/i, '').trim();
   s = s.replace(/^[^A-Za-z0-9(]+/, '').trim();
 
   // 2. Strip LEADING gender marker ("Men's Clifton 10" → "Clifton 10")
@@ -1730,6 +1735,36 @@ app.get('/api/brand-styles', (req, res) => {
   `).all(...params, ...params);
 
   res.json({ records, total: records.length });
+});
+
+// GET /api/brand-style-products — distinct product names under a style_name
+app.get('/api/brand-style-products', (req, res) => {
+  const brand = req.query.brand || '';
+  const style = req.query.style_name || '';
+  const since = req.query.since || '';
+  const month = req.query.month || '';
+  const week  = req.query.week  ? parseInt(req.query.week) : null;
+  const year  = req.query.year  ? String(req.query.year)  : '';
+  if (!brand || !style) return res.json({ products: [] });
+
+  const clauses = [`order_status != 'On Trial'`, `brand = ?`, `style_name = ?`];
+  const params  = [brand, style];
+  if (since) { clauses.push(`purchase_date >= ?`);                   params.push(since); }
+  if (month) { clauses.push(`strftime('%Y-%m', purchase_date) = ?`); params.push(month); }
+  if (week)  { clauses.push(`purchase_week = ?`);                    params.push(week);  }
+  if (year)  { clauses.push(`strftime('%Y', purchase_date) = ?`);    params.push(year);  }
+  const where = clauses.join(' AND ');
+
+  const products = db.prepare(`
+    SELECT product_name, SUM(quantity) AS orders_qty
+    FROM orders
+    WHERE ${where}
+    GROUP BY product_name
+    ORDER BY orders_qty DESC
+    LIMIT 200
+  `).all(...params);
+
+  res.json({ products });
 });
 
 const server = app.listen(PORT, () => {

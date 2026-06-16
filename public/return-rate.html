@@ -909,6 +909,56 @@ function filterBsStyles() {
   _bsStyleFilterTimer = setTimeout(renderBsTable, 150);
 }
 
+async function toggleStyleProducts(styleName, btn) {
+  const row = btn.closest('tr');
+  const tbody = row.closest('tbody');
+  const existing = tbody.querySelector('.bs-products-row');
+
+  // Close any open expand
+  if (existing) {
+    const isThis = existing.dataset.style === styleName;
+    existing.remove();
+    tbody.querySelectorAll('.bs-expand-btn').forEach(b => { b.textContent = '▶'; b.style.background = 'var(--border)'; });
+    if (isThis) return;
+  }
+
+  btn.textContent = '▼';
+  btn.style.background = 'var(--primary, #3b82f6)';
+  btn.style.color = '#fff';
+
+  const loadingRow = document.createElement('tr');
+  loadingRow.className = 'bs-products-row';
+  loadingRow.dataset.style = styleName;
+  loadingRow.innerHTML = `<td colspan="4" style="padding:8px 28px 8px 52px;background:var(--bg);font-size:12px;color:var(--text-muted)">
+    <span class="spinner"></span> Loading…
+  </td>`;
+  row.after(loadingRow);
+
+  try {
+    const { since, month, week, year } = bsTimeFilters();
+    const qs = new URLSearchParams({ brand: _bsCurrentBrand, style_name: styleName, since, month, week, year });
+    const d = await fetchCached(`/api/brand-style-products?${qs}`);
+
+    if (!d.products || !d.products.length) {
+      loadingRow.innerHTML = `<td colspan="4" style="padding:8px 28px 12px 52px;background:var(--bg);font-size:12px;color:var(--text-muted)">No products found.</td>`;
+      return;
+    }
+
+    const items = d.products.map(p =>
+      `<div style="display:flex;justify-content:space-between;gap:16px;padding:3px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--text);font-size:12px">${esc(p.product_name)}</span>
+        <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0">${n(p.orders_qty)} orders</span>
+      </div>`
+    ).join('');
+
+    loadingRow.innerHTML = `<td colspan="4" style="padding:6px 28px 12px 52px;background:var(--bg);border-bottom:2px solid var(--border)">
+      <div style="max-height:220px;overflow-y:auto">${items}</div>
+    </td>`;
+  } catch(e) {
+    loadingRow.innerHTML = `<td colspan="4" style="padding:8px 28px 12px 52px;background:var(--bg);font-size:12px;color:#e53e3e">${esc(e.message)}</td>`;
+  }
+}
+
 function renderBsTable() {
   const container = document.getElementById('bsTableContainer');
   if (!container) return;
@@ -951,7 +1001,11 @@ function renderBsTable() {
       style="border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s"
       onmouseover="if(!this.dataset.sel)this.style.background='var(--bg)'"
       onmouseout="if(!this.dataset.sel)this.style.background=''">
-      <td style="padding:10px 16px 10px 28px;font-weight:500">${esc(r.name)}</td>
+      <td style="padding:10px 16px 10px 28px;font-weight:500">
+        <span class="bs-expand-btn" data-style="${esc(r.name)}"
+          onclick="event.stopPropagation();toggleStyleProducts('${safeName}',this)"
+          title="Show products"
+          style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;border-radius:4px;background:var(--border);color:var(--text-muted);font-size:9px;cursor:pointer;user-select:none;vertical-align:middle;flex-shrink:0">▶</span>${esc(r.name)}</td>
       <td style="padding:10px 16px;text-align:right">${n(r.orders_qty)}</td>
       <td style="padding:10px 16px;text-align:right">${n(r.returns_qty)}</td>
       <td style="padding:10px 28px 10px 16px;text-align:right">${rateBadge(r.return_rate)}</td>
