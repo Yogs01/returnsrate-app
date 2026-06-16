@@ -130,7 +130,7 @@ const KNOWN_BRANDS = [
   'New Balance','Puma','Osprey','Gregory','Deuter','Thule','Patagonia',
   'Columbia','Arc\'teryx','Cotopaxi','Eagle Creek','Warhammer',
   'Keds','REEF','Caterpillar','CAT Footwear','On',
-  'Blundstone','Vans','Converse','Skechers','Dr. Martens','Hunter',
+  'Top-Sider','Blundstone','Vans','Converse','Skechers','Dr. Martens','Hunter',
   'Baffin','Kamik','Muck Boot','Pendleton','Woolrich',
   'Henley Hansen','Helly Hansen','The North Face','Black Diamond',
   'Darn Tough','Smartwool','Wigwam','Thorlos','Bombas'
@@ -313,6 +313,10 @@ function extractStyleName(productName, brand) {
   // After brand stripping, clean up any leading non-alphanumeric junk (e.g. lone "|")
   s = s.replace(/^[^A-Za-z0-9(]+/, '').trim();
 
+  // 1c. Strip leading volume/capacity for drinkware: "20 Oz Wide Flex Sip Lid Stone" → "Wide Flex Sip Lid Stone"
+  s = s.replace(/^\d+(?:\.\d+)?\s*(?:fl\.?\s*)?oz\s+/i, '').trim();
+  s = s.replace(/^[^A-Za-z0-9(]+/, '').trim();
+
   // 1b. Strip Spanish shoe-type prefix + optional activity phrase + optional gender
   //     "Zapatillas Speedgoat 6 para Mujer" → "Speedgoat 6"
   //     "Zapatos de Transporte para Hombre" → "" (full strip, returns original in step 15)
@@ -342,6 +346,8 @@ function extractStyleName(productName, brand) {
 
   // 5c. Strip "for Men", "for Women", "for Men and Women" phrase (long Blundstone/Brooks descriptions)
   s = s.replace(/\s+for\s+(?:Men|Women|Men\s+and\s+Women|Boys|Girls|Kids)\b.*/i, '').trim();
+  // Orphan trailing "for" left when product name is truncated before the gender word
+  s = s.replace(/\s+for\s*$/i, '').trim();
 
   // 5d. Strip Amazon BM/D/B US width-size codes and everything after
   //     "Clifton 8 Womens Running 95 BM US Blackwhite" → "Clifton 8"
@@ -350,6 +356,8 @@ function extractStyleName(productName, brand) {
 
   // 6. Strip trailing width/fit words (do this before size so "8.5 Medium" → "8.5" → stripped)
   s = s.replace(/\s+(?:Medium|Narrow|Regular|Wide|Standard|Extra\s+Wide|D\s+Width)\s*$/i, '').trim();
+  // "8 Medium US" / "9 Wide US" — number + width word + US (not caught by step 7 because word between number and unit)
+  s = s.replace(/\s+\d+(?:[.,]\d+)?\s+(?:Medium|Narrow|Regular|Wide|Standard|Extra\s+Wide)\s+US\b.*/i, '').trim();
 
   // 7. Strip trailing size with explicit unit or bare "Size N": "9 US", "10 UK", "Size 9"
   s = s.replace(/\s+(?:Size\s+)?\d+(?:[.,]\d+)?\s*(?:US(?:\s+(?:Men'?s?|Women'?s?))?|UK|EU|AU|CM)\s*$/i, '').trim();
@@ -357,13 +365,15 @@ function extractStyleName(productName, brand) {
 
   // 7b. Strip orphan "Size" with no number (e.g. "Bondi 8 Mens Shoes Size")
   s = s.replace(/\s+Size\s*$/i, '').trim();
+  // Strip trailing volume unit (Hydro Flask etc.): "Wide Mouth Bottle with Flex Cap Black 32 oz"
+  s = s.replace(/\s+\d+(?:\.\d+)?\s*(?:fl\.?\s*)?oz\b.*/i, '').trim();
 
   // 8. Strip trailing decimal number (shoe sizes: 8.5, 9.5 — version numbers are whole)
   s = s.replace(/\s+\d+\.\d+\s*$/i, '').trim();
 
   // 9. Strip trailing shoe category words (only when something non-empty remains after).
   //    No standalone "Shoes?" — that would eat "Shoes" from "Running Shoes" as a standalone name.
-  const catRe = /\s+(?:(?:Road\s+|Trail\s+|Hiking\s+|Walking\s+|Athletic\s+)?Running\s+Shoes?|Trail\s+Shoes?|Road\s+Shoes?|Hiking\s+Shoes?|Walking\s+Shoes?|Gymnastics\s+Shoes?|Sneaker[s]?|Trainer[s]?|Oxford[s]?|Athletic|Footwear)\s*$/i;
+  const catRe = /\s+(?:(?:Road\s+|Trail\s+|Hiking\s+|Walking\s+|Athletic\s+)?Running\s+Shoes?|Trail\s+Shoes?|Road\s+Shoes?|Hiking\s+Shoes?|Walking\s+Shoes?|Gymnastics\s+Shoes?|Sneaker[s]?|Trainer[s]?|Oxford[s]?|Athletic|Footwear|Ballet\s+Flat[s]?|(?:Work\s+|Hiking\s+|Snow\s+|Winter\s+)?Boot[s]?)\s*$/i;
   const nocat = s.replace(catRe, '').trim();
   if (nocat) s = nocat;
 
@@ -387,7 +397,10 @@ function extractStyleName(productName, brand) {
   //     Also pre-strip a bare size number that immediately follows a color word
   //     e.g. "Clifton 10 Stardust 11" → "Clifton 10 Stardust" → "Clifton 10"
   //     e.g. "Rincon 4 Skyward Blue 11" → "Rincon 4 Skyward Blue" → "Rincon 4 Skyward" → "Rincon 4"
-  const colorWords = 'White|Black|Grey|Gray|Blue|Red|Green|Pink|Brown|Navy|Beige|Cream|Yellow|Purple|Orange|Silver|Gold|Coral|Ivory|Bone|Sand|Tan|Olive|Mint|Lilac|Rose|Burgundy|Charcoal|Taupe|Khaki|Teal|Rust|Midnight|Stone|Oat|Latte|Dune|Cloud|Walnut|Mocha|Chalk|Fog|Sky|Slate|Onyx|Forest|Sage|Ember|Ocean|Anthracite|Copper|Stardust|Castlerock|Monochrome|Graphite|Camellia|Scuba|Ibis|Sunflower|Grape|Beetroot|Celeste|Nimbus|Cosmic|Neon|Outer|Space|Skyward|Hoka|Blanc|Twilight|Vanilla|Cyclamen|Tourmaline|Elderberry|Eggnog|Sandstone|Dusk|Peach';
+  // Strip trailing feature descriptors before color/size loop
+  s = s.replace(/\s+with\s+dishwasher\s+safe\b.*/i, '').trim();
+
+  const colorWords = 'White|Black|Grey|Gray|Blue|Red|Green|Pink|Brown|Navy|Beige|Cream|Yellow|Purple|Orange|Silver|Gold|Coral|Ivory|Bone|Sand|Tan|Olive|Mint|Lilac|Rose|Burgundy|Charcoal|Taupe|Khaki|Teal|Rust|Midnight|Stone|Oat|Latte|Dune|Cloud|Walnut|Mocha|Chalk|Fog|Sky|Slate|Onyx|Forest|Sage|Ember|Ocean|Anthracite|Copper|Stardust|Castlerock|Monochrome|Graphite|Camellia|Scuba|Ibis|Sunflower|Grape|Beetroot|Celeste|Nimbus|Cosmic|Neon|Outer|Space|Skyward|Hoka|Blanc|Twilight|Vanilla|Cyclamen|Tourmaline|Elderberry|Eggnog|Sandstone|Dusk|Peach|Goji|Dew';
   const colorRe = new RegExp(`\\s+(?:${colorWords})\\s*$`, 'i');
   const colorThenSizeRe = new RegExp(`(${colorWords})\\s+\\d{1,2}(?:\\.\\d+)?\\s*$`, 'i');
   let prev = '';
@@ -1057,7 +1070,7 @@ app.get('/api/return-rate', (req, res) => {
   const offset   = (page - 1) * limit;
 
   const groupCol = groupBy === 'brand' ? 'brand'
-                 : groupBy === 'style' ? 'product_name'
+                 : groupBy === 'style' ? 'style_name'
                  : 'sku';
 
   // Build filter clauses for the orders table — used in both subqueries (with/without table prefix)
@@ -1118,9 +1131,29 @@ app.get('/api/return-rate', (req, res) => {
   const allParams = [...oF.params, ...rF.params];
 
   try {
-    const stats   = db.prepare(`SELECT COUNT(*) as total, MAX(return_rate) as max_rate FROM (${coreSql})`).get(...allParams);
-    const records = db.prepare(`${coreSql} ORDER BY ${orderSQL} LIMIT ? OFFSET ?`).all(...allParams, limit, offset);
-    const topRow  = db.prepare(`${coreSql} ORDER BY return_rate DESC, returns_qty DESC LIMIT 1`).get(...allParams);
+    // Single pass: window functions embed total count + topRow info so we avoid running
+    // the expensive returns-JOIN subquery 3 separate times (was ~11s for By SKU unfiltered).
+    const rows = db.prepare(`
+      SELECT *,
+        COUNT(*) OVER() AS _total,
+        MAX(return_rate) OVER() AS _maxRate,
+        FIRST_VALUE(name) OVER(ORDER BY return_rate DESC, returns_qty DESC) AS _topName,
+        FIRST_VALUE(sample_name) OVER(ORDER BY return_rate DESC, returns_qty DESC) AS _topSampleName,
+        FIRST_VALUE(sample_brand) OVER(ORDER BY return_rate DESC, returns_qty DESC) AS _topBrand,
+        FIRST_VALUE(returns_qty) OVER(ORDER BY return_rate DESC, returns_qty DESC) AS _topReturns,
+        FIRST_VALUE(orders_qty) OVER(ORDER BY return_rate DESC, returns_qty DESC) AS _topOrders
+      FROM (${coreSql})
+      ORDER BY ${orderSQL}
+      LIMIT ? OFFSET ?
+    `).all(...allParams, limit, offset);
+
+    const total   = rows[0]?._total ?? 0;
+    const maxRate = rows[0]?._maxRate ?? null;
+    const records = rows.map(({ _total, _maxRate, _topName, _topSampleName, _topBrand, _topReturns, _topOrders, ...r }) => r);
+    const topRow  = rows[0]
+      ? { name: rows[0]._topName, sample_name: rows[0]._topSampleName, sample_brand: rows[0]._topBrand,
+          returns_qty: rows[0]._topReturns, orders_qty: rows[0]._topOrders, return_rate: rows[0]._maxRate }
+      : null;
 
     // Stat-card totals: apply all active filters but WITHOUT the `${groupCol} != ''`
     // constraint used in the grouped table. That constraint changes per view (sku/product_name/brand),
@@ -1170,9 +1203,9 @@ app.get('/api/return-rate', (req, res) => {
     const avgRate = totalOrders > 0 ? (totalReturns / totalOrders * 100).toFixed(1) : null;
 
     res.json({
-      records, total: stats.total, page, pages: Math.ceil(stats.total / limit),
+      records, total, page, pages: Math.ceil(total / limit),
       groupBy, avgRate, totalOrders, totalReturns,
-      maxRate: stats.max_rate != null ? parseFloat(stats.max_rate).toFixed(1) : null,
+      maxRate: maxRate != null ? parseFloat(maxRate).toFixed(1) : null,
       topRow
     });
   } catch(e) {
@@ -1767,15 +1800,26 @@ app.get('/api/brand-style-products', (req, res) => {
   const month = req.query.month || '';
   const week  = req.query.week  ? parseInt(req.query.week) : null;
   const year  = req.query.year  ? String(req.query.year)  : '';
-  if (!brand || !style) return res.json({ products: [] });
+  if (!style) return res.json({ products: [] });
 
-  const clauses = [`order_status != 'On Trial'`, `brand = ?`, `style_name = ?`];
-  const params  = [brand, style];
+  const clauses = [`order_status != 'On Trial'`, `style_name = ?`];
+  const params  = [style];
+  if (brand) { clauses.push(`brand = ?`);                            params.push(brand); }
   if (since) { clauses.push(`purchase_date >= ?`);                   params.push(since); }
   if (month) { clauses.push(`strftime('%Y-%m', purchase_date) = ?`); params.push(month); }
   if (week)  { clauses.push(`purchase_week = ?`);                    params.push(week);  }
   if (year)  { clauses.push(`strftime('%Y', purchase_date) = ?`);    params.push(year);  }
   const where = clauses.join(' AND ');
+
+  // Return-side WHERE: always filter by style_name; brand is optional
+  const rClauses = [`ro.style_name = ?`];
+  const rParams  = [style];
+  if (brand) { rClauses.push(`ro.brand = ?`); rParams.push(brand); }
+  if (since) { rClauses.push(`ro.purchase_date >= ?`);                   rParams.push(since); }
+  if (month) { rClauses.push(`strftime('%Y-%m', ro.purchase_date) = ?`); rParams.push(month); }
+  if (week)  { rClauses.push(`ro.purchase_week = ?`);                    rParams.push(week);  }
+  if (year)  { rClauses.push(`strftime('%Y', ro.purchase_date) = ?`);    rParams.push(year);  }
+  const rWhere = rClauses.join(' AND ');
 
   const products = db.prepare(`
     SELECT
@@ -1792,12 +1836,12 @@ app.get('/api/brand-style-products', (req, res) => {
       SELECT ro.product_name, SUM(r.quantity) AS returns_qty
       FROM returns r
       JOIN orders ro ON r.order_id = ro.amazon_order_id AND r.sku = ro.sku
-      WHERE ro.brand = ? AND ro.style_name = ?
+      WHERE ${rWhere}
       GROUP BY ro.product_name
     ) ra ON ra.product_name = oa.product_name
     ORDER BY oa.orders_qty DESC
     LIMIT 200
-  `).all(...params, brand, style);
+  `).all(...params, ...rParams);
 
   res.json({ products });
 });

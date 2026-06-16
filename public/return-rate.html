@@ -473,6 +473,9 @@ function renderTable(d) {
   document.getElementById('thName').textContent =
     isBySKU ? 'SKU / Product' : isByBrand ? 'Brand' : 'Style / Product';
 
+  // Close any open style-product expand rows from previous render
+  document.querySelectorAll('.rate-style-products-row').forEach(el => el.remove());
+
   if (!d.records?.length) {
     document.getElementById('tableBody').innerHTML =
       `<tr><td colspan="7" class="empty-state"><p>No data found. Try adjusting your filters.</p></td></tr>`;
@@ -503,7 +506,12 @@ function renderTable(d) {
          </td>`
       : isByBrand
       ? `<td><strong>${esc(r.name)}</strong>${analyzeBtn}</td>`
-      : `<td style="max-width:300px;font-weight:500">${esc(r.name)}${analyzeBtn}</td>`;
+      : `<td style="max-width:300px;font-weight:500">
+           <span class="rate-style-expand-btn"
+             onclick="event.stopPropagation();toggleRateStyleProducts('${safeName}',this)"
+             title="Show products"
+             style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;border-radius:4px;background:var(--border);color:var(--text-muted);font-size:9px;cursor:pointer;user-select:none;vertical-align:middle;flex-shrink:0">▶</span>${esc(r.name)}${analyzeBtn}
+         </td>`;
 
     const brandCell = isByBrand ? '' : `<td style="color:var(--text-muted)">${esc(r.sample_brand||'—')}</td>`;
 
@@ -910,6 +918,75 @@ function bsSortBy(key) {
 function filterBsStyles() {
   clearTimeout(_bsStyleFilterTimer);
   _bsStyleFilterTimer = setTimeout(renderBsTable, 150);
+}
+
+function getRateFilters() {
+  const timelineRaw = document.getElementById('timelineFilter').value;
+  const since = timelineSince(timelineRaw);
+  const month = document.getElementById('monthFilter').value;
+  const brand = document.getElementById('brandFilter').value;
+  const weekRaw = document.getElementById('weekFilter').value;
+  let week = '', year = '';
+  if (weekRaw) { try { const w = JSON.parse(weekRaw); week = w.week; year = w.year; } catch(_) {} }
+  return { since, month, week, year, brand };
+}
+
+async function toggleRateStyleProducts(styleName, btn) {
+  const row = btn.closest('tr');
+  const tbody = row.closest('tbody');
+  const existing = tbody.querySelector('.rate-style-products-row');
+
+  if (existing) {
+    const isThis = existing.dataset.style === styleName;
+    existing.remove();
+    tbody.querySelectorAll('.rate-style-expand-btn').forEach(b => { b.textContent = '▶'; b.style.background = 'var(--border)'; b.style.color = 'var(--text-muted)'; });
+    if (isThis) return;
+  }
+
+  btn.textContent = '▼';
+  btn.style.background = '#3b82f6';
+  btn.style.color = '#fff';
+
+  const loadingRow = document.createElement('tr');
+  loadingRow.className = 'rate-style-products-row';
+  loadingRow.dataset.style = styleName;
+  loadingRow.innerHTML = `<td colspan="7" style="padding:8px 28px 8px 52px;background:var(--bg);font-size:12px;color:var(--text-muted)">
+    <span class="spinner"></span> Loading…
+  </td>`;
+  row.after(loadingRow);
+
+  try {
+    const { since, month, week, year, brand } = getRateFilters();
+    const qs = new URLSearchParams({ style_name: styleName, since, month, week, year, brand });
+    const d = await fetchCached(`/api/brand-style-products?${qs}`);
+
+    if (!d.products || !d.products.length) {
+      loadingRow.innerHTML = `<td colspan="7" style="padding:8px 28px 12px 52px;background:var(--bg);font-size:12px;color:var(--text-muted)">No products found.</td>`;
+      return;
+    }
+
+    const rateClr = r => r == null ? 'var(--text-muted)' : r >= 25 ? '#e53e3e' : r >= 15 ? '#dd6b20' : r >= 5 ? '#d69e2e' : '#38a169';
+    const header = `<div style="display:flex;gap:12px;padding:3px 0 5px;border-bottom:2px solid var(--border);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)">
+      <span style="flex:1">Product</span>
+      <span style="width:62px;text-align:right;flex-shrink:0">Orders</span>
+      <span style="width:58px;text-align:right;flex-shrink:0">Returns</span>
+      <span style="width:42px;text-align:right;flex-shrink:0">Rate</span>
+    </div>`;
+    const items = d.products.map(p =>
+      `<div style="display:flex;gap:12px;padding:4px 0;border-bottom:1px solid var(--border);align-items:center">
+        <span style="color:var(--text);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.product_name)}">${esc(p.product_name)}</span>
+        <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;width:62px;text-align:right">${n(p.orders_qty)}</span>
+        <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;width:58px;text-align:right">${n(p.returns_qty)}</span>
+        <span style="font-size:11px;font-weight:700;color:${rateClr(p.return_rate)};white-space:nowrap;flex-shrink:0;width:42px;text-align:right">${p.return_rate != null ? p.return_rate.toFixed(1)+'%' : '—'}</span>
+      </div>`
+    ).join('');
+
+    loadingRow.innerHTML = `<td colspan="7" style="padding:6px 28px 12px 52px;background:var(--bg);border-bottom:2px solid var(--border)">
+      <div style="max-height:260px;overflow-y:auto">${header}${items}</div>
+    </td>`;
+  } catch(e) {
+    loadingRow.innerHTML = `<td colspan="7" style="padding:8px 28px 12px 52px;background:var(--bg);font-size:12px;color:#e53e3e">${esc(e.message)}</td>`;
+  }
 }
 
 async function toggleStyleProducts(styleName, btn) {
