@@ -313,9 +313,10 @@ function extractStyleName(productName, brand) {
   // After brand stripping, clean up any leading non-alphanumeric junk (e.g. lone "|")
   s = s.replace(/^[^A-Za-z0-9(]+/, '').trim();
 
-  // 1b. Strip Spanish shoe-type prefix + optional "de correr/Carrera/bajos" + optional
-  //     "para Hombre/Mujer": "Zapatillas Speedgoat 6 para Mujer" → "Speedgoat 6"
-  s = s.replace(/^(?:Zapatillas|Zapatos|Sandalias|Tenis)(?:\s+(?:de\s+(?:correr|Carrera)|bajos?))?\s*(?:para\s+(?:Hombres?|Mujeres?|Ni[ñn]os?|Ni[ñn]as?)\s*)?/i, '').trim();
+  // 1b. Strip Spanish shoe-type prefix + optional activity phrase + optional gender
+  //     "Zapatillas Speedgoat 6 para Mujer" → "Speedgoat 6"
+  //     "Zapatos de Transporte para Hombre" → "" (full strip, returns original in step 15)
+  s = s.replace(/^(?:Zapatillas|Zapatos|Sandalias|Tenis)(?:\s+(?:de\s+(?:correr|Carrera|Transporte|Montaña|Senderismo)|bajos?))?\s*(?:para\s+(?:Hombres?|Mujeres?|Ni[ñn]os?|Ni[ñn]as?)\s*)?/i, '').trim();
   s = s.replace(/^[^A-Za-z0-9(]+/, '').trim();
 
   // 2. Strip LEADING gender marker ("Men's Clifton 10" → "Clifton 10")
@@ -335,8 +336,17 @@ function extractStyleName(productName, brand) {
   // 5b. Strip "Gender Shoes Size N" suffix: "Bondi 8 Mens Shoes Size 9" → "Bondi 8"
   s = s.replace(/\s+(?:Men'?s?|Women'?s?|Kids?'?s?|Boys?|Girls?)\s+Shoes?\s+(?:Size\s+)?\d*(?:[.,]\d+)?\s*$/i, '').trim();
 
+  // 5a. Strip trailing Spanish gender phrase: "Speedgoat 6 para Mujer" → "Speedgoat 6"
+  s = s.replace(/\s+(?:Zapatillas|Zapatos|Tenis|Sandalias)\s+para\s+(?:Hombres?|Mujeres?|Ni[ñn]os?|Ni[ñn]as?)\b.*$/i, '').trim();
+  s = s.replace(/\s+para\s+(?:Hombres?|Mujeres?|Ni[ñn]os?|Ni[ñn]as?)\b.*$/i, '').trim();
+
   // 5c. Strip "for Men", "for Women", "for Men and Women" phrase (long Blundstone/Brooks descriptions)
   s = s.replace(/\s+for\s+(?:Men|Women|Men\s+and\s+Women|Boys|Girls|Kids)\b.*/i, '').trim();
+
+  // 5d. Strip Amazon BM/D/B US width-size codes and everything after
+  //     "Clifton 8 Womens Running 95 BM US Blackwhite" → "Clifton 8"
+  //     "Bondi SR Womens Oxford BM US BlackBlack"       → "Bondi SR"
+  s = s.replace(/\s+(?:(?:Women'?s?|Men'?s?)\s+\w+\s+)?\d{0,3}(?:\.\d)?\s*[BDM]{1,2}\s+US\b.*$/i, '').trim();
 
   // 6. Strip trailing width/fit words (do this before size so "8.5 Medium" → "8.5" → stripped)
   s = s.replace(/\s+(?:Medium|Narrow|Regular|Wide|Standard|Extra\s+Wide|D\s+Width)\s*$/i, '').trim();
@@ -353,7 +363,7 @@ function extractStyleName(productName, brand) {
 
   // 9. Strip trailing shoe category words (only when something non-empty remains after).
   //    No standalone "Shoes?" — that would eat "Shoes" from "Running Shoes" as a standalone name.
-  const catRe = /\s+(?:(?:Road\s+|Trail\s+|Hiking\s+|Walking\s+|Athletic\s+)?Running\s+Shoes?|Trail\s+Shoes?|Road\s+Shoes?|Hiking\s+Shoes?|Walking\s+Shoes?|Gymnastics\s+Shoes?|Sneaker[s]?|Trainer[s]?|Athletic|Footwear)\s*$/i;
+  const catRe = /\s+(?:(?:Road\s+|Trail\s+|Hiking\s+|Walking\s+|Athletic\s+)?Running\s+Shoes?|Trail\s+Shoes?|Road\s+Shoes?|Hiking\s+Shoes?|Walking\s+Shoes?|Gymnastics\s+Shoes?|Sneaker[s]?|Trainer[s]?|Oxford[s]?|Athletic|Footwear)\s*$/i;
   const nocat = s.replace(catRe, '').trim();
   if (nocat) s = nocat;
 
@@ -374,21 +384,33 @@ function extractStyleName(productName, brand) {
   s = s.replace(/\s*\([^)]*\)?\s*$/, '').trim();
 
   // 11. Strip trailing common color words (loop for stacked colors like "White White")
-  const colorRe = /\s+(?:White|Black|Grey|Gray|Blue|Red|Green|Pink|Brown|Navy|Beige|Cream|Yellow|Purple|Orange|Silver|Gold|Coral|Ivory|Bone|Sand|Tan|Olive|Mint|Lilac|Rose|Burgundy|Charcoal|Taupe|Khaki|Teal|Rust|Midnight|Stone|Oat|Latte|Dune|Cloud|Walnut|Mocha|Chalk|Fog|Sky|Slate|Onyx|Forest|Sage|Ember|Ocean|Anthracite|Copper|Stardust|Castlerock|Monochrome|Graphite|Camellia|Scuba|Ibis|Sunflower|Grape|Beetroot|Celeste|Nimbus|Cosmic|Neon|Outer|Space|Skyward|Hoka)\s*$/i;
+  //     Also pre-strip a bare size number that immediately follows a color word
+  //     e.g. "Clifton 10 Stardust 11" → "Clifton 10 Stardust" → "Clifton 10"
+  //     e.g. "Rincon 4 Skyward Blue 11" → "Rincon 4 Skyward Blue" → "Rincon 4 Skyward" → "Rincon 4"
+  const colorWords = 'White|Black|Grey|Gray|Blue|Red|Green|Pink|Brown|Navy|Beige|Cream|Yellow|Purple|Orange|Silver|Gold|Coral|Ivory|Bone|Sand|Tan|Olive|Mint|Lilac|Rose|Burgundy|Charcoal|Taupe|Khaki|Teal|Rust|Midnight|Stone|Oat|Latte|Dune|Cloud|Walnut|Mocha|Chalk|Fog|Sky|Slate|Onyx|Forest|Sage|Ember|Ocean|Anthracite|Copper|Stardust|Castlerock|Monochrome|Graphite|Camellia|Scuba|Ibis|Sunflower|Grape|Beetroot|Celeste|Nimbus|Cosmic|Neon|Outer|Space|Skyward|Hoka|Blanc|Twilight|Vanilla|Cyclamen|Tourmaline|Elderberry|Eggnog|Sandstone|Dusk|Peach';
+  const colorRe = new RegExp(`\\s+(?:${colorWords})\\s*$`, 'i');
+  const colorThenSizeRe = new RegExp(`(${colorWords})\\s+\\d{1,2}(?:\\.\\d+)?\\s*$`, 'i');
   let prev = '';
-  while (s !== prev) { prev = s; s = s.replace(colorRe, '').trim(); }
+  while (s !== prev) {
+    prev = s;
+    s = s.replace(colorThenSizeRe, '$1').trim();
+    s = s.replace(colorRe, '').trim();
+  }
 
   // 12. Strip trailing material/texture and fit-descriptor words (loop — "GTX Waterproof" needs two passes)
-  const matRe = /\s+(?:Leather|Textile|Mesh|Knit|Fabric|Synthetic|Suede|Nubuck|Canvas|Flyknit|Gore-Tex|GTX|Waterproof|Neutral|Supportive|Support|Stability|Cushioned|Cushioning)\s*$/i;
+  const matRe = /\s+(?:Leather|Textile|Mesh|Knit|Fabric|Synthetic|Suede|Nubuck|Canvas|Flyknit|Gore-Tex|GTX|Waterproof|Neutral|Supportive|Support|Stability|Performance|Cushioned|Cushioning)\s*$/i;
   prev = ''; while (s !== prev) { prev = s; s = s.replace(matRe, '').trim(); }
 
   // 13. Second pass of category + shoes strip (color/material removal may have exposed them)
+  //     Then re-run material loop — e.g. "Bondi 7 Stability Supportive Running Shoes" →
+  //     catRe strips "Running Shoes" → "Bondi 7 Stability Supportive" → matRe loop strips both
   const nocat2 = s.replace(catRe, '').trim();
   if (nocat2) s = nocat2;
   const noShoes2 = s.replace(/\s+Shoes?\s*$/i, '').trim();
   if (noShoes2 && !/^(?:Running|Trail|Road|Hiking|Walking|Athletic|Gym)\s*$/i.test(noShoes2)) {
     s = noShoes2;
   }
+  prev = ''; while (s !== prev) { prev = s; s = s.replace(matRe, '').trim(); }
 
   // 14. Final trailing gender strip (exposed after category/color removal)
   s = s.replace(/\s+(Women'?s?|Men'?s?|Kids?'?s?|Boys?|Girls?|Unisex|\(W\)|\(M\))\s*$/i, '').trim();
@@ -1756,13 +1778,26 @@ app.get('/api/brand-style-products', (req, res) => {
   const where = clauses.join(' AND ');
 
   const products = db.prepare(`
-    SELECT product_name, SUM(quantity) AS orders_qty
-    FROM orders
-    WHERE ${where}
-    GROUP BY product_name
-    ORDER BY orders_qty DESC
+    SELECT
+      oa.product_name,
+      oa.orders_qty,
+      COALESCE(ra.returns_qty, 0)                                                   AS returns_qty,
+      ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)     AS return_rate
+    FROM (
+      SELECT product_name, SUM(quantity) AS orders_qty
+      FROM orders WHERE ${where}
+      GROUP BY product_name
+    ) oa
+    LEFT JOIN (
+      SELECT ro.product_name, SUM(r.quantity) AS returns_qty
+      FROM returns r
+      JOIN orders ro ON r.order_id = ro.amazon_order_id AND r.sku = ro.sku
+      WHERE ro.brand = ? AND ro.style_name = ?
+      GROUP BY ro.product_name
+    ) ra ON ra.product_name = oa.product_name
+    ORDER BY oa.orders_qty DESC
     LIMIT 200
-  `).all(...params);
+  `).all(...params, brand, style);
 
   res.json({ products });
 });

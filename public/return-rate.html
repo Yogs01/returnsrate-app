@@ -945,15 +945,24 @@ async function toggleStyleProducts(styleName, btn) {
       return;
     }
 
+    const rateClr = r => r == null ? 'var(--text-muted)' : r >= 25 ? '#e53e3e' : r >= 15 ? '#dd6b20' : r >= 5 ? '#d69e2e' : '#38a169';
+    const header = `<div style="display:flex;gap:12px;padding:3px 0 5px;border-bottom:2px solid var(--border);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)">
+      <span style="flex:1">Product</span>
+      <span style="width:62px;text-align:right;flex-shrink:0">Orders</span>
+      <span style="width:58px;text-align:right;flex-shrink:0">Returns</span>
+      <span style="width:42px;text-align:right;flex-shrink:0">Rate</span>
+    </div>`;
     const items = d.products.map(p =>
-      `<div style="display:flex;justify-content:space-between;gap:16px;padding:3px 0;border-bottom:1px solid var(--border)">
-        <span style="color:var(--text);font-size:12px">${esc(p.product_name)}</span>
-        <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0">${n(p.orders_qty)} orders</span>
+      `<div style="display:flex;gap:12px;padding:4px 0;border-bottom:1px solid var(--border);align-items:center">
+        <span style="color:var(--text);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.product_name)}">${esc(p.product_name)}</span>
+        <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;width:62px;text-align:right">${n(p.orders_qty)}</span>
+        <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;width:58px;text-align:right">${n(p.returns_qty)}</span>
+        <span style="font-size:11px;font-weight:700;color:${rateClr(p.return_rate)};white-space:nowrap;flex-shrink:0;width:42px;text-align:right">${p.return_rate != null ? p.return_rate.toFixed(1)+'%' : '—'}</span>
       </div>`
     ).join('');
 
     loadingRow.innerHTML = `<td colspan="4" style="padding:6px 28px 12px 52px;background:var(--bg);border-bottom:2px solid var(--border)">
-      <div style="max-height:220px;overflow-y:auto">${items}</div>
+      <div style="max-height:260px;overflow-y:auto">${header}${items}</div>
     </td>`;
   } catch(e) {
     loadingRow.innerHTML = `<td colspan="4" style="padding:8px 28px 12px 52px;background:var(--bg);font-size:12px;color:#e53e3e">${esc(e.message)}</td>`;
