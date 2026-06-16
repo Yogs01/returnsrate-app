@@ -818,7 +818,7 @@ let _bsDebTimer;
 let _bsCurrentBrand = '';
 let _bsCurrentStyle = '';
 let _bsRecords = [];
-let _bsSortKey = 'return_rate';
+let _bsSortKey = 'orders_qty';
 let _bsSortDir = 'desc';
 let _bsStyleFilterTimer;
 
@@ -852,6 +852,8 @@ async function loadBrandStyles() {
   const match = (allFilters.brands || []).find(b => b.toLowerCase() === input.toLowerCase()) || input;
   _bsCurrentBrand = match;
   _bsCurrentStyle = '';
+  _bsSortKey = 'orders_qty';
+  _bsSortDir = 'desc';
 
   const styleEl  = document.getElementById('bsStyleTable');
   const genderEl = document.getElementById('bsGenderTable');
