@@ -807,9 +807,16 @@ function renderModalDetail(name, type, d) {
         </tr></thead>
         <tbody>`;
     topStyles.forEach((item, i) => {
+      const asin = item.asin && item.asin !== 'null' ? item.asin : null;
+      const asinBadge = asin
+        ? `<a href="https://www.amazon.com/dp/${asin}" target="_blank" rel="noopener"
+             style="display:inline-block;margin-top:3px;font-size:10px;color:var(--brand);text-decoration:none;
+                    background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:1px 5px"
+             title="Open on Amazon">${asin} ↗</a>`
+        : '';
       html += `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:8px;color:var(--text-muted)">${i+1}</td>
-        <td style="padding:8px;font-weight:500;max-width:280px">${esc(item.product_name||'—')}</td>
+        <td style="padding:8px;font-weight:500;max-width:280px">${esc(item.product_name||'—')}<br>${asinBadge}</td>
         <td style="padding:8px;text-align:right">${n(item.orders_qty)}</td>
         <td style="padding:8px;text-align:right">${n(item.returns_qty)}</td>
         <td style="padding:8px;text-align:right">${rateBadge(item.return_rate)}</td>

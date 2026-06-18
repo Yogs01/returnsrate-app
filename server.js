@@ -1368,11 +1368,11 @@ app.get('/api/brand-detail', (req, res) => {
     // same r.sku = o.sku condition for consistency with the main table
     const topStyles = db.prepare(`
       SELECT
-        oa.product_name, oa.orders_qty,
+        oa.product_name, oa.asin, oa.orders_qty,
         COALESCE(ra.returns_qty, 0)                                                  AS returns_qty,
         ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)    AS return_rate
       FROM (
-        SELECT product_name, SUM(quantity) AS orders_qty
+        SELECT product_name, MAX(asin) AS asin, SUM(quantity) AS orders_qty
         FROM orders WHERE ${dF.sql} AND product_name != ''
         GROUP BY product_name HAVING orders_qty >= 3
       ) oa
