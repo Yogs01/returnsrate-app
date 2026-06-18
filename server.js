@@ -44,6 +44,10 @@ let _filtersCacheTs = 0;
 const FILTERS_TTL = 5 * 60 * 1000; // 5 minutes
 function invalidateFiltersCache() { _filtersCache = null; _filtersCacheTs = 0; }
 
+// /api/period-stats runs 9+ queries on every dashboard load but only changes on upload
+let _periodStatsCache = null;
+function invalidatePeriodStatsCache() { _periodStatsCache = null; }
+
 // Increase timeout to 10 minutes for large file uploads
 const upload = multer({
   dest: process.env.UPLOADS_PATH || path.join(__dirname, 'uploads'),
@@ -90,6 +94,9 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_gender ON orders(gender)`);
 // Add style_name column to orders (core model name, stripped of brand/color/size)
 try { db.exec(`ALTER TABLE orders ADD COLUMN style_name TEXT DEFAULT ''`); } catch(e) {}
 db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_style_name ON orders(brand, style_name)`);
+
+// Every returns JOIN uses (order_id, sku) — index both columns together for fast lookups
+db.exec(`CREATE INDEX IF NOT EXISTS idx_returns_order_sku ON returns(order_id, sku)`);
 
 // Insert orders
 const insertOrder = db.prepare(`
@@ -251,7 +258,8 @@ function backfillOrderGender() {
 // Only writes to DB when the value actually changes, so subsequent startups are fast.
 function backfillStyleName() {
   try {
-    const rows = db.prepare(`SELECT id, product_name, brand, style_name FROM orders`).all();
+    // Only load rows missing a style_name — avoids scanning 300K rows on every startup
+    const rows = db.prepare(`SELECT id, product_name, brand, style_name FROM orders WHERE style_name IS NULL OR style_name = ''`).all();
     if (!rows.length) return 0;
     const upd = db.prepare(`UPDATE orders SET style_name = ? WHERE id = ?`);
     let changed = 0;
@@ -428,8 +436,11 @@ function extractStyleName(productName, brand) {
   // 14. Final trailing gender strip (exposed after category/color removal)
   s = s.replace(/\s+(Women'?s?|Men'?s?|Kids?'?s?|Boys?|Girls?|Unisex|\(W\)|\(M\))\s*$/i, '').trim();
 
-  // 15. Reject obvious non-style results (single punctuation, brand-only fragments)
-  if (/^[-|.]+$/.test(s) || /^(?:ONE\s+ONE|ONE|HOKA|Nike|Adidas)\s*$/i.test(s)) {
+  // 15. Reject obvious non-style results: pure punctuation, brand-only fragments,
+  //     or strings that start with a digit/comma (size/color artifacts like "0, Negro -,")
+  if (/^[-|.,\s]+$/.test(s) ||
+      /^(?:ONE\s+ONE|ONE|HOKA|Nike|Adidas)\s*$/i.test(s) ||
+      /^\d/.test(s)) {
     return productName.trim();
   }
 
@@ -766,7 +777,8 @@ async function processFileAsync(filePath, dataType, uploadedBy, filename, jobId)
     db.prepare('INSERT OR IGNORE INTO upload_log (filename, file_hash, type, rows_added, rows_skipped, uploaded_by) VALUES (?,?,?,?,?,?)')
       .run(filename, fHash, dataType, ordersAdded + returnsAdded, ordersSkipped + returnsSkipped, uploadedBy);
 
-    invalidateFiltersCache(); // new data means filters may have changed
+    invalidateFiltersCache();    // new data means filters may have changed
+    invalidatePeriodStatsCache(); // new data changes period-stats
     backfillReturnGender();   // fill gender for any newly added returns with blank gender
     backfillOrderGender();    // fill gender for any newly added orders with blank gender
     backfillStyleName();      // fill style_name for any newly added orders
@@ -869,7 +881,9 @@ app.get('/api/job/:id', (req, res) => {
 
 // GET /api/period-stats — Last Month / 3 Months / 12 Months breakdown
 // Returns are attributed to the PURCHASE MONTH of the original order (matched via Order ID)
+// Result is cached in memory and invalidated only on upload (9+ queries, data rarely changes)
 app.get('/api/period-stats', (req, res) => {
+  if (_periodStatsCache) return res.json(_periodStatsCache);
   // Always use the last COMPLETE calendar month as the reference point.
   // This prevents a partial current month (e.g. May 1st data) from
   // becoming "Last Month" and showing misleadingly low numbers.
@@ -922,11 +936,13 @@ app.get('/api/period-stats', (req, res) => {
     };
   }
 
-  res.json({
+  const result = {
     lastMonth:    calc(oMonths.slice(0, 1)),
     last3Months:  calc(oMonths.slice(0, 3)),
     last12Months: calc(oMonths.slice(0, 12)),
-  });
+  };
+  _periodStatsCache = result;
+  res.json(result);
 });
 
 // GET /api/summary
@@ -1511,8 +1527,9 @@ app.delete('/api/orders/dedup', (req, res) => {
   }
 });
 
-// GET /api/reset-all — wipes ALL data (orders + returns + upload log) for a full clean re-import
-app.get('/api/reset-all', (req, res) => {
+// POST /api/reset-all — wipes ALL data (orders + returns + upload log) for a full clean re-import
+// POST required to prevent accidental wipe from browser navigation or link prefetch
+app.post('/api/reset-all', (req, res) => {
   const orders  = db.prepare('SELECT COUNT(*) as n FROM orders').get().n;
   const returns = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
   db.prepare('DELETE FROM orders').run();
