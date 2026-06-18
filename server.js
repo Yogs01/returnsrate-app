@@ -1772,10 +1772,12 @@ app.get('/api/brand-styles', (req, res) => {
     SELECT
       oa.style_name        AS name,
       oa.orders_qty,
+      oa.asins,
       COALESCE(ra.returns_qty, 0)                                                AS returns_qty,
       ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)  AS return_rate
     FROM (
-      SELECT style_name, SUM(quantity) AS orders_qty
+      SELECT style_name, SUM(quantity) AS orders_qty,
+             GROUP_CONCAT(DISTINCT asin) AS asins
       FROM orders WHERE ${oWhere}
       GROUP BY style_name
     ) oa
@@ -1824,11 +1826,12 @@ app.get('/api/brand-style-products', (req, res) => {
   const products = db.prepare(`
     SELECT
       oa.product_name,
+      oa.asin,
       oa.orders_qty,
       COALESCE(ra.returns_qty, 0)                                                   AS returns_qty,
       ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)     AS return_rate
     FROM (
-      SELECT product_name, SUM(quantity) AS orders_qty
+      SELECT product_name, MAX(asin) AS asin, SUM(quantity) AS orders_qty
       FROM orders WHERE ${where}
       GROUP BY product_name
     ) oa

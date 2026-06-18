@@ -966,6 +966,11 @@ async function toggleRateStyleProducts(styleName, btn) {
     }
 
     const rateClr = r => r == null ? 'var(--text-muted)' : r >= 25 ? '#e53e3e' : r >= 15 ? '#dd6b20' : r >= 5 ? '#d69e2e' : '#38a169';
+    const asinLink = a => a && a !== 'null'
+      ? `<a href="https://www.amazon.com/dp/${a}" target="_blank" rel="noopener"
+           style="font-size:10px;color:var(--brand);text-decoration:none;margin-left:6px;white-space:nowrap"
+           title="Open on Amazon">${a} ↗</a>`
+      : '';
     const header = `<div style="display:flex;gap:12px;padding:3px 0 5px;border-bottom:2px solid var(--border);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)">
       <span style="flex:1">Product</span>
       <span style="width:62px;text-align:right;flex-shrink:0">Orders</span>
@@ -974,7 +979,7 @@ async function toggleRateStyleProducts(styleName, btn) {
     </div>`;
     const items = d.products.map(p =>
       `<div style="display:flex;gap:12px;padding:4px 0;border-bottom:1px solid var(--border);align-items:center">
-        <span style="color:var(--text);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.product_name)}">${esc(p.product_name)}</span>
+        <span style="color:var(--text);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.product_name)}">${esc(p.product_name)}${asinLink(p.asin)}</span>
         <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;width:62px;text-align:right">${n(p.orders_qty)}</span>
         <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;width:58px;text-align:right">${n(p.returns_qty)}</span>
         <span style="font-size:11px;font-weight:700;color:${rateClr(p.return_rate)};white-space:nowrap;flex-shrink:0;width:42px;text-align:right">${p.return_rate != null ? p.return_rate.toFixed(1)+'%' : '—'}</span>
@@ -1025,6 +1030,11 @@ async function toggleStyleProducts(styleName, btn) {
     }
 
     const rateClr = r => r == null ? 'var(--text-muted)' : r >= 25 ? '#e53e3e' : r >= 15 ? '#dd6b20' : r >= 5 ? '#d69e2e' : '#38a169';
+    const asinLink = a => a && a !== 'null'
+      ? `<a href="https://www.amazon.com/dp/${a}" target="_blank" rel="noopener"
+           style="font-size:10px;color:var(--brand);text-decoration:none;margin-left:6px;white-space:nowrap"
+           title="Open on Amazon">${a} ↗</a>`
+      : '';
     const header = `<div style="display:flex;gap:12px;padding:3px 0 5px;border-bottom:2px solid var(--border);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)">
       <span style="flex:1">Product</span>
       <span style="width:62px;text-align:right;flex-shrink:0">Orders</span>
@@ -1033,7 +1043,7 @@ async function toggleStyleProducts(styleName, btn) {
     </div>`;
     const items = d.products.map(p =>
       `<div style="display:flex;gap:12px;padding:4px 0;border-bottom:1px solid var(--border);align-items:center">
-        <span style="color:var(--text);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.product_name)}">${esc(p.product_name)}</span>
+        <span style="color:var(--text);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.product_name)}">${esc(p.product_name)}${asinLink(p.asin)}</span>
         <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;width:62px;text-align:right">${n(p.orders_qty)}</span>
         <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;flex-shrink:0;width:58px;text-align:right">${n(p.returns_qty)}</span>
         <span style="font-size:11px;font-weight:700;color:${rateClr(p.return_rate)};white-space:nowrap;flex-shrink:0;width:42px;text-align:right">${p.return_rate != null ? p.return_rate.toFixed(1)+'%' : '—'}</span>
@@ -1086,6 +1096,19 @@ function renderBsTable() {
 
   rows.forEach(r => {
     const safeName = String(r.name||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const asinList = r.asins ? r.asins.split(',').filter(a => a && a !== 'null') : [];
+    const asinChips = asinList.slice(0, 3).map(a =>
+      `<a href="https://www.amazon.com/dp/${a}" target="_blank" rel="noopener"
+        onclick="event.stopPropagation()"
+        style="font-size:10px;color:var(--brand);text-decoration:none;background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;white-space:nowrap;display:inline-block"
+        title="Open on Amazon">${a}</a>`
+    ).join('');
+    const moreChip = asinList.length > 3
+      ? `<span style="font-size:10px;color:var(--text-muted)">+${asinList.length - 3} more</span>`
+      : '';
+    const asinRow = asinList.length
+      ? `<div style="margin-top:3px">${asinChips}${moreChip}</div>`
+      : '';
     html += `<tr class="bs-row" onclick="loadStyleGender('${safeName}', this)"
       style="border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s"
       onmouseover="if(!this.dataset.sel)this.style.background='var(--bg)'"
@@ -1094,7 +1117,7 @@ function renderBsTable() {
         <span class="bs-expand-btn" data-style="${esc(r.name)}"
           onclick="event.stopPropagation();toggleStyleProducts('${safeName}',this)"
           title="Show products"
-          style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;border-radius:4px;background:var(--border);color:var(--text-muted);font-size:9px;cursor:pointer;user-select:none;vertical-align:middle;flex-shrink:0">▶</span>${esc(r.name)}</td>
+          style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;border-radius:4px;background:var(--border);color:var(--text-muted);font-size:9px;cursor:pointer;user-select:none;vertical-align:middle;flex-shrink:0">▶</span>${esc(r.name)}${asinRow}</td>
       <td style="padding:10px 16px;text-align:right">${n(r.orders_qty)}</td>
       <td style="padding:10px 16px;text-align:right">${n(r.returns_qty)}</td>
       <td style="padding:10px 28px 10px 16px;text-align:right">${rateBadge(r.return_rate)}</td>
