@@ -1122,7 +1122,8 @@ app.get('/api/return-rate', (req, res) => {
       oa.sample_brand,
       oa.orders_qty,
       COALESCE(ra.returns_qty, 0)                                                AS returns_qty,
-      ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)  AS return_rate
+      ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)  AS return_rate,
+      ra.top_reason
     FROM (
       SELECT
         ${groupCol}                                                               AS name,
@@ -1134,11 +1135,16 @@ app.get('/api/return-rate', (req, res) => {
       GROUP BY ${groupCol}
     ) oa
     LEFT JOIN (
-      SELECT o.${groupCol} AS name, SUM(r.quantity) AS returns_qty
-      FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
-      WHERE ${rF.sql}
-      GROUP BY o.${groupCol}
+      SELECT name, SUM(qty) AS returns_qty, MAX(top_reason) AS top_reason
+      FROM (
+        SELECT o.${groupCol} AS name, r.reason AS top_reason, SUM(r.quantity) AS qty,
+          FIRST_VALUE(r.reason) OVER (PARTITION BY o.${groupCol} ORDER BY SUM(r.quantity) DESC) AS _top
+        FROM returns r
+        JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+        WHERE ${rF.sql} AND r.reason != ''
+        GROUP BY o.${groupCol}, r.reason
+      ) WHERE top_reason = _top
+      GROUP BY name
     ) ra ON ra.name = oa.name
     WHERE oa.orders_qty >= ${minOrders}
   `;

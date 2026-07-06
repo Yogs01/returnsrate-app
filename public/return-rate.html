@@ -272,6 +272,11 @@ const n   = v => (v == null ? '—' : Number(v).toLocaleString());
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const fmtPct = v => v == null ? '—' : parseFloat(v).toFixed(1) + '%';
 
+function fmtReason(r) {
+  if (!r) return '';
+  return r.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function rateBadge(rate) {
   if (rate == null) return `<span class="rate-badge rate-ok">—</span>`;
   const r = parseFloat(rate);
@@ -499,10 +504,18 @@ function renderTable(d) {
       📊
     </button>`;
 
+    const reasonBadge = (isBySKU && r.top_reason)
+      ? `<span style="display:inline-block;margin-top:4px;padding:2px 7px;border-radius:12px;
+                      background:#eef2ff;color:#3730a3;font-size:10px;font-weight:600">
+           ${esc(fmtReason(r.top_reason))}
+         </span>`
+      : '';
+
     const nameCell = isBySKU
       ? `<td>
            <div style="font-weight:600;font-size:13px">${esc(r.name)}${analyzeBtn}</div>
            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(r.sample_name||'')}</div>
+           ${reasonBadge}
          </td>`
       : isByBrand
       ? `<td><strong>${esc(r.name)}</strong>${analyzeBtn}</td>`
