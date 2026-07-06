@@ -1427,8 +1427,8 @@ app.get('/api/brand-detail', (req, res) => {
                ELSE '' END AS gender
         FROM returns r GROUP BY r.order_id, r.sku
       ) rg ON rg.order_id = o.amazon_order_id AND rg.sku = o.sku
-      WHERE ${dF.sql} GROUP BY g
-    `).all(...dF.params);
+      WHERE ${oF.sql} GROUP BY g
+    `).all(...oF.params);
 
     // Returns by gender bucket (uses r.gender — unambiguous)
     const gRetRows = db.prepare(`
