@@ -1123,7 +1123,7 @@ app.get('/api/return-rate', (req, res) => {
       oa.orders_qty,
       COALESCE(ra.returns_qty, 0)                                                AS returns_qty,
       ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)  AS return_rate,
-      ra.top_reason
+      tr.top_reason
     FROM (
       SELECT
         ${groupCol}                                                               AS name,
@@ -1135,22 +1135,27 @@ app.get('/api/return-rate', (req, res) => {
       GROUP BY ${groupCol}
     ) oa
     LEFT JOIN (
-      SELECT name, SUM(qty) AS returns_qty, MAX(top_reason) AS top_reason
-      FROM (
-        SELECT o.${groupCol} AS name, r.reason AS top_reason, SUM(r.quantity) AS qty,
-          FIRST_VALUE(r.reason) OVER (PARTITION BY o.${groupCol} ORDER BY SUM(r.quantity) DESC) AS _top
+      SELECT o.${groupCol} AS name, SUM(r.quantity) AS returns_qty
+      FROM returns r
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+      WHERE ${rF.sql}
+      GROUP BY o.${groupCol}
+    ) ra ON ra.name = oa.name
+    LEFT JOIN (
+      SELECT name, top_reason FROM (
+        SELECT o.${groupCol} AS name, r.reason AS top_reason,
+          RANK() OVER (PARTITION BY o.${groupCol} ORDER BY SUM(r.quantity) DESC) AS rk
         FROM returns r
         JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
         WHERE ${rF.sql} AND r.reason != ''
         GROUP BY o.${groupCol}, r.reason
-      ) WHERE top_reason = _top
-      GROUP BY name
-    ) ra ON ra.name = oa.name
+      ) WHERE rk = 1
+    ) tr ON tr.name = oa.name
     WHERE oa.orders_qty >= ${minOrders}
   `;
 
-  // All params = order-side params + return-side params (each subquery bound separately)
-  const allParams = [...oF.params, ...rF.params];
+  // All params = order-side params + return-side params (ra subquery) + return-side params (tr subquery)
+  const allParams = [...oF.params, ...rF.params, ...rF.params];
 
   try {
     // Single pass: window functions embed total count + topRow info so we avoid running
