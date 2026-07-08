@@ -95,8 +95,7 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_gender ON orders(gender)`);
 try { db.exec(`ALTER TABLE orders ADD COLUMN style_name TEXT DEFAULT ''`); } catch(e) {}
 db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_style_name ON orders(brand, style_name)`);
 
-// Every returns JOIN uses (order_id, sku) — index both columns together for fast lookups
-db.exec(`CREATE INDEX IF NOT EXISTS idx_returns_order_sku ON returns(order_id, sku)`);
+// idx_returns_oid_sku is already created in db.js — no duplicate needed here
 
 // Insert orders
 const insertOrder = db.prepare(`
@@ -787,9 +786,11 @@ async function processFileAsync(filePath, dataType, uploadedBy, filename, jobId)
     job.returnsAdded = returnsAdded; job.returnsSkipped = returnsSkipped;
     job.progress = 100;
     console.log(`[${jobId}] done — orders +${ordersAdded}, returns +${returnsAdded}`);
+    setTimeout(() => { delete jobs[jobId]; }, 60 * 60 * 1000);
   } catch(e) {
     console.error(`[${jobId}] error:`, e.message);
     jobs[jobId].status = 'error'; jobs[jobId].error = e.message;
+    setTimeout(() => { delete jobs[jobId]; }, 60 * 60 * 1000);
   } finally {
     try { fs.unlinkSync(filePath); } catch(_) {}
   }
@@ -1123,7 +1124,7 @@ app.get('/api/return-rate', (req, res) => {
       oa.orders_qty,
       COALESCE(ra.returns_qty, 0)                                                AS returns_qty,
       ROUND(COALESCE(ra.returns_qty, 0) * 100.0 / NULLIF(oa.orders_qty, 0), 1)  AS return_rate,
-      tr.top_reason
+      ra.top_reason
     FROM (
       SELECT
         ${groupCol}                                                               AS name,
@@ -1135,27 +1136,28 @@ app.get('/api/return-rate', (req, res) => {
       GROUP BY ${groupCol}
     ) oa
     LEFT JOIN (
-      SELECT o.${groupCol} AS name, SUM(r.quantity) AS returns_qty
-      FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
-      WHERE ${rF.sql}
-      GROUP BY o.${groupCol}
+      SELECT name, SUM(qty) AS returns_qty,
+        MAX(CASE WHEN rk = 1 AND reason != '' THEN reason END) AS top_reason
+      FROM (
+        SELECT name, reason, qty,
+          RANK() OVER (
+            PARTITION BY name
+            ORDER BY CASE WHEN reason = '' THEN -1 ELSE qty END DESC
+          ) AS rk
+        FROM (
+          SELECT o.${groupCol} AS name, r.reason, SUM(r.quantity) AS qty
+          FROM returns r
+          JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
+          WHERE ${rF.sql}
+          GROUP BY o.${groupCol}, r.reason
+        )
+      )
+      GROUP BY name
     ) ra ON ra.name = oa.name
-    LEFT JOIN (
-      SELECT name, top_reason FROM (
-        SELECT o.${groupCol} AS name, r.reason AS top_reason,
-          RANK() OVER (PARTITION BY o.${groupCol} ORDER BY SUM(r.quantity) DESC) AS rk
-        FROM returns r
-        JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
-        WHERE ${rF.sql} AND r.reason != ''
-        GROUP BY o.${groupCol}, r.reason
-      ) WHERE rk = 1
-    ) tr ON tr.name = oa.name
     WHERE oa.orders_qty >= ${minOrders}
   `;
 
-  // All params = order-side params + return-side params (ra subquery) + return-side params (tr subquery)
-  const allParams = [...oF.params, ...rF.params, ...rF.params];
+  const allParams = [...oF.params, ...rF.params];
 
   try {
     // Single pass: window functions embed total count + topRow info so we avoid running
@@ -1546,6 +1548,8 @@ app.post('/api/reset-all', (req, res) => {
   db.prepare('DELETE FROM orders').run();
   db.prepare('DELETE FROM returns').run();
   db.prepare('DELETE FROM upload_log').run();
+  invalidateFiltersCache();
+  invalidatePeriodStatsCache();
   res.send(`<h2>Full Reset Done</h2><p>Deleted: <b>${orders.toLocaleString()}</b> orders and <b>${returns.toLocaleString()}</b> returns</p><p>Database is now empty. Re-upload your Excel file to restore data.</p><br><a href="/">← Back to Dashboard</a>`);
 });
 
@@ -1553,6 +1557,8 @@ app.post('/api/reset-all', (req, res) => {
 app.get('/api/returns/reset', (req, res) => {
   const before = db.prepare('SELECT COUNT(*) as n FROM returns').get().n;
   db.prepare('DELETE FROM returns').run();
+  invalidateFiltersCache();
+  invalidatePeriodStatsCache();
   res.send(`<h2>Returns Reset Done</h2><p>Deleted: <b>${before}</b> return records</p><p>Returns table is now empty.</p><br><p>Now re-upload your Excel file to restore clean data.</p><br><a href="/">← Back to Dashboard</a>`);
 });
 
