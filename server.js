@@ -139,8 +139,20 @@ const KNOWN_BRANDS = [
   'Top-Sider','Blundstone','Vans','Converse','Skechers','Dr. Martens','Hunter',
   'Baffin','Kamik','Muck Boot','Pendleton','Woolrich',
   'Henley Hansen','Helly Hansen','The North Face','Black Diamond',
-  'Darn Tough','Smartwool','Wigwam','Thorlos','Bombas'
+  'Darn Tough','Smartwool','Wigwam','Thorlos','Bombas',
+  'Allbirds','HEYDUDE','HUK','DC Shoes',
 ].sort((a, b) => b.length - a.length);
+
+// Aliases: non-standard spellings / old names → canonical KNOWN_BRANDS name.
+// canonicalizeBrand() checks this before the KNOWN_BRANDS list.
+const BRAND_ALIASES = {
+  "hey dude":     "HEYDUDE",      // brand renamed from Hey Dude → HEYDUDE in 2021
+  "heydude":      "HEYDUDE",
+  "men's moab 3": "Merrell",      // product name mistakenly stored as brand
+  "z/1 classic":  "Med Couture",  // Med Couture product line stored as brand
+  "muck boot":    "Muck",         // consolidate Muck / Muck Boot
+  "cat footwear": "CAT Footwear",
+};
 
 // Infer gender from an explicit value (CSV column) or product name patterns.
 // Called at record-build time so the result is stored — no LIKE scans at query time.
@@ -284,6 +296,8 @@ function backfillStyleName() {
 function canonicalizeBrand(brand) {
   if (!brand || brand === '-' || brand === '0') return brand;
   const lower = brand.trim().toLowerCase();
+  const aliased = BRAND_ALIASES[lower];
+  if (aliased) return aliased;
   for (const kb of KNOWN_BRANDS) {
     if (kb.toLowerCase() === lower) return kb;
   }
@@ -479,10 +493,11 @@ function runBrandFix() {
   const updateOrders = db.prepare(`UPDATE orders  SET brand = ? WHERE id = ?`);
   const updateRets   = db.prepare(`UPDATE returns SET brand = ? WHERE id = ?`);
 
-  // Pass 1: fill in blank brands from product_name
+  // Pass 1: fill in blank/invalid brands from product_name
+  // '[object Object]' = ExcelJS returned a hyperlink cell as an object before fix
   const emptyOrders = db.prepare(`
     SELECT id, product_name FROM orders
-    WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0')
+    WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0' OR brand = '[object Object]')
       AND product_name IS NOT NULL AND product_name != ''
   `).all();
   let fixedOrders = 0;
@@ -495,7 +510,7 @@ function runBrandFix() {
 
   const emptyRets = db.prepare(`
     SELECT id, product_name FROM returns
-    WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0')
+    WHERE (brand IS NULL OR brand = '' OR brand = '-' OR brand = '0' OR brand = '[object Object]')
       AND product_name IS NOT NULL AND product_name != ''
   `).all();
   let fixedReturns = 0;
@@ -635,9 +650,11 @@ function processSheetBatched(filePath, sheetName, batchSize, batchCallback) {
         headers.forEach((h, i) => {
           const cell = row.getCell(i + 1);
           let v = cell.value;
-          // ExcelJS returns rich text as objects — flatten to string
-          if (v && typeof v === 'object' && v.richText) v = v.richText.map(r => r.text).join('');
-          if (v && typeof v === 'object' && v.result !== undefined) v = v.result; // formula result
+          if (v && typeof v === 'object' && v.richText)            v = v.richText.map(r => r.text).join('');
+          if (v && typeof v === 'object' && v.result !== undefined) v = v.result;   // formula result
+          if (v && typeof v === 'object' && v.text !== undefined)   v = v.text;     // hyperlinks
+          if (v && typeof v === 'object' && v.error !== undefined)  v = '';         // formula errors
+          if (v && typeof v === 'object')                            v = String(v);  // catch-all
           obj[h] = v !== null && v !== undefined ? v : '';
         });
 
@@ -1887,6 +1904,7 @@ const server = app.listen(PORT, () => {
   console.log(`\n✅ Orders & Returns App running at http://localhost:${PORT}\n`);
   // Run backfills after the server is up so Railway's health check succeeds first
   setImmediate(() => {
+    runBrandFix();            // fix [object Object] entries + canonicalize all brands
     backfillReturnGender();
     backfillOrderGender();
     backfillStyleName();
