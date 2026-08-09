@@ -926,20 +926,21 @@ app.get('/api/period-stats', (req, res) => {
     `).get(...om)?.v || 0;
 
     // Returns: use SUM(r.quantity) to match Excel's Return Qty calculation
+    // JOIN on both order_id AND sku to avoid inflation when orders have multiple SKUs
     const ret = db.prepare(`
       SELECT
         SUM(r.quantity) as total,
         SUM(CASE WHEN r.disposition='SELLABLE' THEN r.quantity ELSE 0 END) as sellable,
         SUM(CASE WHEN r.disposition!='' AND r.disposition!='SELLABLE' THEN r.quantity ELSE 0 END) as unsellable
       FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
       WHERE strftime('%Y-%m', o.purchase_date) IN (${inP})
     `).get(...om);
 
     const dispositions = db.prepare(`
       SELECT r.disposition, SUM(r.quantity) as count
       FROM returns r
-      JOIN orders o ON r.order_id = o.amazon_order_id
+      JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
       WHERE strftime('%Y-%m', o.purchase_date) IN (${inP})
         AND r.disposition != '' AND r.disposition != 'SELLABLE'
       GROUP BY r.disposition ORDER BY count DESC
@@ -988,9 +989,9 @@ app.get('/api/summary', (req, res) => {
   // Returns attributed to PURCHASE MONTH of the original order via Order ID join
   const monthlyReturns = db.prepare(`
     SELECT strftime('%Y-%m', o.purchase_date) as month,
-      SUM(r.quantity) as return_count, SUM(r.quantity) as return_units
+      SUM(r.quantity) as return_count
     FROM returns r
-    JOIN orders o ON r.order_id = o.amazon_order_id
+    JOIN orders o ON r.order_id = o.amazon_order_id AND r.sku = o.sku
     WHERE o.purchase_date != '' AND o.purchase_date IS NOT NULL
     GROUP BY month
   `).all();
@@ -999,7 +1000,7 @@ app.get('/api/summary', (req, res) => {
   const monthly = monthlyOrders.map(o => ({
     ...o,
     returns: rMap[o.month]?.return_count || 0,
-    return_units: rMap[o.month]?.return_units || 0
+    return_units: rMap[o.month]?.return_count || 0
   }));
 
   const weekly = db.prepare(`
@@ -1060,7 +1061,7 @@ app.get('/api/filters', (req, res) => {
       return res.json(_filtersCache);
     }
     const reasons = db.prepare(`SELECT DISTINCT reason FROM returns WHERE reason != '' ORDER BY reason`).all().map(r => r.reason);
-    const brands = db.prepare(`SELECT DISTINCT brand FROM orders WHERE brand != '' AND brand != '-' AND brand != '0' ORDER BY brand`).all().map(r => r.brand);
+    const brands = db.prepare(`SELECT DISTINCT brand FROM orders WHERE brand != '' AND brand != '-' AND brand != '0' AND brand != '[object Object]' ORDER BY brand`).all().map(r => r.brand);
     const months = db.prepare(`SELECT DISTINCT return_month FROM returns WHERE return_month != '' ORDER BY return_month DESC`).all().map(r => r.return_month);
     const dispositions = db.prepare(`SELECT DISTINCT disposition FROM returns WHERE disposition != '' ORDER BY disposition`).all().map(r => r.disposition);
     const orderMonths = db.prepare(`
