@@ -1014,7 +1014,7 @@ app.get('/api/summary', (req, res) => {
       COALESCE(r.return_count, 0) as returns
     FROM orders o
     LEFT JOIN (
-      SELECT return_week, CAST(strftime('%Y', return_date) AS TEXT) as year, COUNT(*) as return_count
+      SELECT return_week, CAST(strftime('%Y', return_date) AS TEXT) as year, SUM(quantity) as return_count
       FROM returns WHERE return_date != '' GROUP BY year, return_week
     ) r ON o.purchase_week = r.return_week AND strftime('%Y', o.purchase_date) = r.year
     WHERE o.purchase_date != '' AND o.purchase_week IS NOT NULL
@@ -1024,7 +1024,7 @@ app.get('/api/summary', (req, res) => {
 
   const byReason = db.prepare(`SELECT reason, COUNT(*) as count, SUM(quantity) as units FROM returns WHERE reason != '' GROUP BY reason ORDER BY count DESC`).all();
   const byDisposition = db.prepare(`SELECT disposition, COUNT(*) as count FROM returns WHERE disposition != '' GROUP BY disposition ORDER BY count DESC`).all();
-  const byBrand = db.prepare(`SELECT brand, COUNT(*) as count, SUM(quantity) as units FROM returns WHERE brand != '' AND brand != '-' GROUP BY brand ORDER BY count DESC LIMIT 20`).all();
+  const byBrand = db.prepare(`SELECT brand, COUNT(*) as count, SUM(quantity) as units FROM returns WHERE brand != '' AND brand != '-' AND brand != '[object Object]' GROUP BY brand ORDER BY count DESC LIMIT 20`).all();
   const byGender = db.prepare(`SELECT gender, COUNT(*) as count FROM returns WHERE gender != '' GROUP BY gender ORDER BY count DESC`).all();
 
   res.json({ orderStats, returnStats, monthly, weekly, byReason, byDisposition, byBrand, byGender });
