@@ -587,6 +587,51 @@ function runBrandFix() {
     }
   })();
 
+  // Pass 1b: direct SQL pattern-fix for [object Object] records whose product names
+  // don't start with the brand (so extractBrandFromName can't auto-detect them).
+  // Each entry is [brand, LIKE-pattern]. Applied to both orders and returns.
+  const objectBrandPatches = [
+    ['Merrell',      '%Moab%'],
+    ['Merrell',      '%Antora%'],
+    ['Merrell',      '%Wrapt Sneaker%'],
+    ['Merrell',      '%Encore Breeze%'],
+    ['Merrell',      '%Speed Strike%'],
+    ['Merrell',      '%Jungle Moc%'],
+    ['Merrell',      '%Wildcat Trail%'],
+    ['Merrell',      '%Nova 4%'],
+    ['Birkenstock',  '%Terran%'],
+    ['Birkenstock',  '%Arizona%'],
+    ['Birkenstock',  '%Boston%'],
+    ['Birkenstock',  '%Gizeh%'],
+    ['Sanuk',        '%Yoga Mat%'],
+    ['Sanuk',        '%Yoga Joy%'],
+    ['Sanuk',        '%Yoga Sandy%'],
+    ['Sanuk',        '%Yoga Sling%'],
+    ['Sanuk',        '%Soft 60%'],
+    ['Sanuk',        '%Chiba%'],
+    ['Sanuk',        '%Bubblecush%'],
+    ['Sanuk',        '%Ziggy ST%'],
+    ['Sanuk',        '%Ziggy%'],
+    ['Sanuk',        '%You Got My Back%'],
+    ['HUK',          '%Rogue Wave%'],
+    ['KEEN',         '%Newport H2%'],
+    ['Ariat',        '%Darlin Western%'],
+    ['DC Shoes',     '%Villain%'],
+    ['DC Shoes',     '%Manteca%'],
+    ['DC Shoes',     '%Pure HIGH-TOP%'],
+    ['CAT Footwear', '%Invader Mid%'],
+    ['CAT Footwear', '%Wheelbase%'],
+    ['CAT Footwear', '%Colorado Equip%'],
+  ];
+  const patchOrd = db.prepare(`UPDATE orders  SET brand = ? WHERE brand = '[object Object]' AND product_name LIKE ?`);
+  const patchRet = db.prepare(`UPDATE returns SET brand = ? WHERE brand = '[object Object]' AND product_name LIKE ?`);
+  db.transaction(() => {
+    for (const [brand, pattern] of objectBrandPatches) {
+      const ro = patchOrd.run(brand, pattern); fixedOrders   += ro.changes;
+      const rr = patchRet.run(brand, pattern); fixedReturns  += rr.changes;
+    }
+  })();
+
   // Pass 2: canonicalize existing non-blank brands (e.g. "SOREL" → "Sorel", "HOKA" → "HOKA")
   // This removes duplicates caused by case mismatches between raw file data and brand detector.
   const allOrders = db.prepare(`SELECT id, brand FROM orders WHERE brand IS NOT NULL AND brand != '' AND brand != '-' AND brand != '0'`).all();
