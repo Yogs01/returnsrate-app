@@ -141,17 +141,43 @@ const KNOWN_BRANDS = [
   'Henley Hansen','Helly Hansen','The North Face','Black Diamond',
   'Darn Tough','Smartwool','Wigwam','Thorlos','Bombas',
   'Allbirds','HEYDUDE','HUK','DC Shoes',
+  'Ariat','Xero Shoes','Babolat','Helly-Hansen','Veja','Emile Henry',
+  'Blenders Eyewear','Big Agnes','Chemex','Barefoot Dreams','Cat Footwear',
+  'Maipo','New Era','Xtratuf','OOFOS','Marmot','Hestra',
 ].sort((a, b) => b.length - a.length);
 
 // Aliases: non-standard spellings / old names → canonical KNOWN_BRANDS name.
 // canonicalizeBrand() checks this before the KNOWN_BRANDS list.
 const BRAND_ALIASES = {
-  "hey dude":     "HEYDUDE",      // brand renamed from Hey Dude → HEYDUDE in 2021
-  "heydude":      "HEYDUDE",
-  "men's moab 3": "Merrell",      // product name mistakenly stored as brand
-  "z/1 classic":  "Med Couture",  // Med Couture product line stored as brand
-  "muck boot":    "Muck",         // consolidate Muck / Muck Boot
-  "cat footwear": "CAT Footwear",
+  "hey dude":                        "HEYDUDE",
+  "heydude":                         "HEYDUDE",
+  "men's moab 3":                    "Merrell",
+  "z/1 classic":                     "Med Couture",
+  "muck boot":                       "Muck",
+  "cat footwear":                    "CAT Footwear",
+  // Ariat fragments — Amazon CSV sometimes stores model/line as brand
+  "ariat":                           "Ariat",
+  "ariat booker":                    "Ariat",
+  "ariat booker ultra western":      "Ariat",
+  "ariat cruiser":                   "Ariat",
+  "ariat heritage r toe stretch":    "Ariat",
+  "ariat rambler western boot":      "Ariat",
+  "ariat rambler":                   "Ariat",
+  "ariat rambler recon":             "Ariat",
+  "ariat remuda western":            "Ariat",
+  "ariathrtg western r toe":         "Ariat",
+  "ariat spitfire":                  "Ariat",
+  // Xero Shoes fragments
+  "xero shoes genesis":              "Xero Shoes",
+  "xero shoes prio":                 "Xero Shoes",
+  "xero shoes prio cross":           "Xero Shoes",
+  "xero shoes scrambler trail low":  "Xero Shoes",
+  // Cole Haan product line stored as brand
+  "zerogrand":                       "Cole Haan",
+  // '47 Brand stored without apostrophe
+  "47 brand":                        "47",
+  // Helly Hansen variants
+  "helly-hansen":                    "Helly Hansen",
 };
 
 // Infer gender from an explicit value (CSV column) or product name patterns.
