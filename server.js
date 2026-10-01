@@ -945,10 +945,10 @@ app.get('/api/period-stats', (req, res) => {
     if (!om.length) return { orders_units: 0, returns_total: 0, sellable: 0, unsellable: 0, dispositions: [] };
     const inP = om.map(() => '?').join(',');
 
-    // Match Excel: SUM(quantity) for all statuses except 'On Trial' (Cancelled has qty=0 so no effect)
+    // Match Excel: SUM(quantity) excluding Cancelled and On Trial
     const orders_units = db.prepare(`
       SELECT SUM(quantity) as v FROM orders
-      WHERE strftime('%Y-%m', purchase_date) IN (${inP}) AND order_status != 'On Trial'
+      WHERE strftime('%Y-%m', purchase_date) IN (${inP}) AND order_status NOT IN ('On Trial', 'Cancelled')
     `).get(...om)?.v || 0;
 
     // Returns: use SUM(r.quantity) to match Excel's Return Qty calculation
@@ -992,22 +992,22 @@ app.get('/api/period-stats', (req, res) => {
 
 // GET /api/summary
 app.get('/api/summary', (req, res) => {
-  // Match Excel: count/sum all orders except 'On Trial'. Cancelled has qty=0 so doesn't affect units.
+  // Match Excel: exclude Cancelled and On Trial from order/unit counts
   const orderStats = db.prepare(`SELECT
     COUNT(*) as total,
     SUM(CASE WHEN order_status='Shipped' THEN 1 ELSE 0 END) as shipped,
     SUM(CASE WHEN order_status='Cancelled' THEN 1 ELSE 0 END) as cancelled,
     SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue,
-    SUM(CASE WHEN order_status != 'On Trial' THEN quantity ELSE 0 END) as units
+    SUM(CASE WHEN order_status NOT IN ('On Trial', 'Cancelled') THEN quantity ELSE 0 END) as units
   FROM orders`).get();
   const returnStats = db.prepare(`SELECT COUNT(*) as total, SUM(quantity) as units FROM returns`).get();
 
   // Orders by purchase month
   const monthlyOrders = db.prepare(`
     SELECT strftime('%Y-%m', purchase_date) as month, MIN(purchase_date) as month_start,
-      SUM(CASE WHEN order_status != 'On Trial' THEN quantity ELSE 0 END) as orders,
+      SUM(CASE WHEN order_status NOT IN ('On Trial', 'Cancelled') THEN quantity ELSE 0 END) as orders,
       SUM(CASE WHEN order_status='Shipped' THEN item_price ELSE 0 END) as revenue,
-      SUM(CASE WHEN order_status != 'On Trial' THEN quantity ELSE 0 END) as units,
+      SUM(CASE WHEN order_status NOT IN ('On Trial', 'Cancelled') THEN quantity ELSE 0 END) as units,
       COUNT(CASE WHEN order_status='Cancelled' THEN 1 END) as cancelled
     FROM orders WHERE purchase_date != '' AND purchase_date IS NOT NULL
     GROUP BY month ORDER BY month ASC
@@ -1137,7 +1137,7 @@ app.get('/api/return-rate', (req, res) => {
   // Build filter clauses for the orders table — used in both subqueries (with/without table prefix)
   const buildFilters = (prefix = '') => {
     const p = prefix ? `${prefix}.` : '';
-    const clauses = [`${p}order_status != 'On Trial'`, `${p}${groupCol} != ''`];
+    const clauses = [`${p}order_status NOT IN ('On Trial', 'Cancelled')`, `${p}${groupCol} != ''`];
     const vals = [];
     if (since) { clauses.push(`${p}purchase_date >= ?`);                   vals.push(since); }
     if (month) { clauses.push(`strftime('%Y-%m', ${p}purchase_date) = ?`); vals.push(month); }
