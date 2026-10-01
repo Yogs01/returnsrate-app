@@ -140,7 +140,7 @@ const KNOWN_BRANDS = [
   'Baffin','Kamik','Muck Boot','Pendleton','Woolrich',
   'Helly Hansen','The North Face','Black Diamond',
   'Darn Tough','Smartwool','Wigwam','Thorlos','Bombas',
-  'Allbirds','HEYDUDE','HUK','DC Shoes',
+  'Allbirds','HEYDUDE','HUK','DC Shoes','Sanuk',
   'Ariat','Xero Shoes','Babolat','Emile Henry',
   'Blenders Eyewear','Big Agnes','Chemex','Barefoot Dreams',
   'Maipo','New Era','Xtratuf',
@@ -176,6 +176,8 @@ const BRAND_ALIASES = {
   "zerogrand":                       "Cole Haan",
   // '47 Brand stored without apostrophe
   "47 brand":                        "47",
+  // Ariat SKU-code prefix used in some Amazon listing titles
+  "arirc":                           "Ariat",
   // Helly Hansen variants (including common misspelling)
   "helly-hansen":                    "Helly Hansen",
   "henley hansen":                   "Helly Hansen",
@@ -505,7 +507,44 @@ function extractBrandFromName(productName) {
     if (p.toLowerCase().includes(kw.toLowerCase())) return 'Warhammer';
   }
 
-  // 4. "Brand - Product" dash pattern
+  // 4. "DC Men's / DC mens / DC Women's" prefix — stored without "Shoes" suffix in Amazon titles
+  if (/^DC\s+(men|women|mens|womens|unisex)/i.test(p)) return 'DC Shoes';
+
+  // 5. "CAT Men's / CAT Women's" prefix (Caterpillar/CAT Footwear stored as "CAT" in listings)
+  if (/^CAT\s+(men|women|foot)/i.test(p)) return 'CAT Footwear';
+
+  // 6. "ARIRC" SKU-code prefix used by Ariat on Amazon listings
+  if (/^ARIRC\s/i.test(p)) return 'Ariat';
+
+  // 7. Merrell model names that don't carry the brand prefix in the listing title
+  const merrellModels = ['Moab 3','MOAB 3','MOAB 6','Moab Adventure','MOAB ADVENTURE',
+    'Antora','Wrapt Sneaker','Encore Breeze','Speed Strike','Nova 4','Jungle Moc',
+    'Siren Edge','Siren Trail','Altalight','Wildwood','Wildcat Trail'];
+  for (const kw of merrellModels) {
+    if (p.toLowerCase().startsWith(kw.toLowerCase())) return 'Merrell';
+  }
+
+  // 8. Sanuk model names that don't carry the brand prefix
+  const sanukModels = ['Yoga Mat','Yoga Joy','Yoga Sandy','Yoga Sling','Yoga Braid',
+    'Soft 60','Chiba Loafer','Bubblecush','Ziggy ST','You Got My Back','Yoga Girl'];
+  for (const kw of sanukModels) {
+    if (p.toLowerCase().startsWith(kw.toLowerCase())) return 'Sanuk';
+  }
+
+  // 9. HUK Rogue Wave and other HUK models without brand prefix
+  if (/^Rogue Wave\b/i.test(p)) return 'HUK';
+
+  // 10. "... by Nike" or "... by Brand" trailing attribution (e.g. "Adult Fleece Hoodie by Nike")
+  const byBrand = p.match(/\bby\s+([A-Z][A-Za-z\s&]{1,20}?)\s*$/);
+  if (byBrand) {
+    const candidate = byBrand[1].trim();
+    const canonical = canonicalizeBrand(candidate);
+    if (canonical && canonical !== candidate || KNOWN_BRANDS.some(kb => kb.toLowerCase() === candidate.toLowerCase())) {
+      return canonicalizeBrand(candidate);
+    }
+  }
+
+  // 11. "Brand - Product" dash pattern
   const m = p.match(/^([A-Za-z0-9][^-]{1,30}?)\s*[-–]\s+\S/);
   if (m) {
     const c = m[1].trim();
