@@ -138,12 +138,12 @@ const KNOWN_BRANDS = [
   'Keds','REEF','Caterpillar','CAT Footwear','On',
   'Top-Sider','Blundstone','Vans','Converse','Skechers','Dr. Martens','Hunter',
   'Baffin','Kamik','Muck Boot','Pendleton','Woolrich',
-  'Henley Hansen','Helly Hansen','The North Face','Black Diamond',
+  'Helly Hansen','The North Face','Black Diamond',
   'Darn Tough','Smartwool','Wigwam','Thorlos','Bombas',
   'Allbirds','HEYDUDE','HUK','DC Shoes',
-  'Ariat','Xero Shoes','Babolat','Helly-Hansen','Veja','Emile Henry',
-  'Blenders Eyewear','Big Agnes','Chemex','Barefoot Dreams','Cat Footwear',
-  'Maipo','New Era','Xtratuf','OOFOS','Marmot','Hestra',
+  'Ariat','Xero Shoes','Babolat','Emile Henry',
+  'Blenders Eyewear','Big Agnes','Chemex','Barefoot Dreams',
+  'Maipo','New Era','Xtratuf',
 ].sort((a, b) => b.length - a.length);
 
 // Aliases: non-standard spellings / old names → canonical KNOWN_BRANDS name.
@@ -176,8 +176,9 @@ const BRAND_ALIASES = {
   "zerogrand":                       "Cole Haan",
   // '47 Brand stored without apostrophe
   "47 brand":                        "47",
-  // Helly Hansen variants
+  // Helly Hansen variants (including common misspelling)
   "helly-hansen":                    "Helly Hansen",
+  "henley hansen":                   "Helly Hansen",
 };
 
 // Infer gender from an explicit value (CSV column) or product name patterns.
@@ -1234,7 +1235,7 @@ app.get('/api/return-rate', (req, res) => {
     // By Brand — whichever column has the most blank values lowers the denominator and inflates the
     // rate. The totals should always reflect the same universe of orders regardless of grouping.
     const buildStatsFilters = () => {
-      const clauses = [`order_status != 'On Trial'`];
+      const clauses = [`order_status NOT IN ('On Trial', 'Cancelled')`];
       const vals = [];
       if (since) { clauses.push(`purchase_date >= ?`);                   vals.push(since); }
       if (month) { clauses.push(`strftime('%Y-%m', purchase_date) = ?`); vals.push(month); }
@@ -1259,7 +1260,7 @@ app.get('/api/return-rate', (req, res) => {
       // Filtered — count returns linked to orders that match all active filters via EXISTS.
       // Include o.sku = r.sku so this is consistent with the main coreSql JOIN condition
       // (avoids inflated counts from returns whose SKU doesn't match the ordered SKU).
-      const exClauses = [`o.amazon_order_id = r.order_id`, `o.sku = r.sku`, `o.order_status != 'On Trial'`];
+      const exClauses = [`o.amazon_order_id = r.order_id`, `o.sku = r.sku`, `o.order_status NOT IN ('On Trial', 'Cancelled')`];
       const exParams  = [];
       if (since) { exClauses.push(`o.purchase_date >= ?`);                    exParams.push(since); }
       if (month) { exClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`);  exParams.push(month); }
@@ -1299,7 +1300,7 @@ app.get('/api/gender-breakdown', (req, res) => {
   const style = req.query.style || '';
 
   // Orders filter with 'o.' prefix (for the JOIN)
-  const oClauses = [`o.order_status != 'On Trial'`];
+  const oClauses = [`o.order_status NOT IN ('On Trial', 'Cancelled')`];
   const oParams  = [];
   if (since) { oClauses.push(`o.purchase_date >= ?`);                   oParams.push(since); }
   if (month) { oClauses.push(`strftime('%Y-%m', o.purchase_date) = ?`); oParams.push(month); }
@@ -1317,7 +1318,7 @@ app.get('/api/gender-breakdown', (req, res) => {
   try {
     // ── Orders (sales) by gender bucket ─────────────────────────────────────
     // Plain orders filter (no alias needed — single table)
-    const plainClauses = [`order_status != 'On Trial'`];
+    const plainClauses = [`order_status NOT IN ('On Trial', 'Cancelled')`];
     const plainParams  = [];
     if (since) { plainClauses.push(`purchase_date >= ?`);                   plainParams.push(since); }
     if (month) { plainClauses.push(`strftime('%Y-%m', purchase_date) = ?`); plainParams.push(month); }
@@ -1388,7 +1389,7 @@ app.get('/api/brand-detail', (req, res) => {
   // Build WHERE clauses with optional table alias prefix
   const buildWhere = (prefix = '') => {
     const p = prefix ? `${prefix}.` : '';
-    const clauses = [`${p}order_status != 'On Trial'`];
+    const clauses = [`${p}order_status NOT IN ('On Trial', 'Cancelled')`];
     const vals = [];
     if (brand)      { clauses.push(`${p}brand = ?`);        vals.push(brand); }
     if (sku)        { clauses.push(`${p}sku = ?`);          vals.push(sku);   }
@@ -1835,7 +1836,7 @@ app.get('/api/brand-styles', (req, res) => {
   const year  = req.query.year  ? String(req.query.year)  : '';
   if (!brand) return res.json({ records: [], total: 0 });
 
-  const clauses = [`order_status != 'On Trial'`, `brand = ?`, `length(style_name) > 1`];
+  const clauses = [`order_status NOT IN ('On Trial', 'Cancelled')`, `brand = ?`, `length(style_name) > 1`];
   const params  = [brand];
   if (since) { clauses.push(`purchase_date >= ?`);                   params.push(since); }
   if (month) { clauses.push(`strftime('%Y-%m', purchase_date) = ?`); params.push(month); }
@@ -1882,7 +1883,7 @@ app.get('/api/brand-style-products', (req, res) => {
   const year  = req.query.year  ? String(req.query.year)  : '';
   if (!style) return res.json({ products: [] });
 
-  const clauses = [`order_status != 'On Trial'`, `style_name = ?`];
+  const clauses = [`order_status NOT IN ('On Trial', 'Cancelled')`, `style_name = ?`];
   const params  = [style];
   if (brand) { clauses.push(`brand = ?`);                            params.push(brand); }
   if (since) { clauses.push(`purchase_date >= ?`);                   params.push(since); }

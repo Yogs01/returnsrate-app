@@ -42,7 +42,7 @@
         <table>
           <thead><tr>
             <th>Month</th>
-            <th class="text-right">Shipped Orders</th>
+            <th class="text-right">Orders (excl. Cancelled)</th>
             <th class="text-right">Units Sold</th>
             <th class="text-right">Revenue</th>
             <th class="text-right">Cancelled</th>
@@ -77,7 +77,7 @@ async function load() {
     data: {
       labels,
       datasets: [
-        { label: 'Shipped Orders', data: all.map(m => m.orders), backgroundColor: '#FF9900', borderRadius: 3, yAxisID: 'y' },
+        { label: 'Orders (excl. Cancelled)', data: all.map(m => m.orders), backgroundColor: '#FF9900', borderRadius: 3, yAxisID: 'y' },
         { label: 'Revenue ($)', data: all.map(m => m.revenue), type: 'line', borderColor: '#38a169', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2, yAxisID: 'y2' },
       ]
     },
@@ -127,7 +127,7 @@ async function load() {
 }
 
 function exportCSV() {
-  const headers = ['Month','Shipped Orders','Units Sold','Revenue','Cancelled','Returns','Return Units','Return Rate'];
+  const headers = ['Month','Orders (excl. Cancelled)','Units Sold','Revenue','Cancelled','Returns','Return Units','Return Rate'];
   const rows = monthlyData.map(m => [m.month, m.orders, m.units, m.revenue?.toFixed(2), m.cancelled, m.returns, m.return_units, m.orders>0?((m.returns/m.orders)*100).toFixed(2)+'%':'0%']);
   const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
